@@ -65,12 +65,22 @@
       {
         "command": "extension.loadSnapshot",
         "title": "Load Previous Aggregation Snapshot"
+      },
+      {
+        "command": "extension.togglePreview",
+        "title": "Toggle Aggregation Preview",
+        "icon": "$(preview)"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "extension.refreshAggregateView",
+          "when": "view == aggregateOpenTabsView",
+          "group": "navigation"
+        },
+        {
+          "command": "extension.togglePreview",
           "when": "view == aggregateOpenTabsView",
           "group": "navigation"
         }
@@ -270,6 +280,11 @@
           "type": "boolean",
           "default": true,
           "description": "Include import statements in file summaries."
+        },
+        "aggregateOpenTabs.showPreviewOnStartup": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the aggregation preview panel when the extension starts."
         }
       }
     }

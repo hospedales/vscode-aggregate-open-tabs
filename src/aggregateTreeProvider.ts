@@ -168,6 +168,20 @@ export class AggregateTreeProvider implements
         const items: AggregateTreeItem[] = [];
         const stats = this.getFileStats();
 
+        // Add preview toggle button
+        const previewItem = new AggregateTreeItem(
+            "Toggle Preview",
+            vscode.TreeItemCollapsibleState.None,
+            undefined,
+            {
+                command: 'extension.togglePreview',
+                title: 'Toggle Preview',
+                tooltip: 'Toggle the preview panel'
+            }
+        );
+        previewItem.iconPath = new vscode.ThemeIcon('preview');
+        items.push(previewItem);
+
         // Add main aggregate command with file count
         items.push(new AggregateTreeItem(
             `Aggregate ${stats.totalFiles} Open Files`,
