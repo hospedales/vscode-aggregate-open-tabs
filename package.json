@@ -1,0 +1,70 @@
+{
+  "name": "vscode-aggregate-open-tabs",
+  "displayName": "Aggregate Open Tabs",
+  "description": "Collects code from all currently open tabs and combines it into one file",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:extension.aggregateOpenTabs"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "extension.aggregateOpenTabs",
+        "title": "Aggregate Open Tabs into One File"
+      }
+    ],
+    "configuration": {
+      "title": "Aggregate Open Tabs",
+      "properties": {
+        "aggregateOpenTabs.fileSeparatorFormat": {
+          "type": "string",
+          "default": "//=============================================================================\n// File: {fileName}\n//=============================================================================",
+          "description": "Format of the separator between files. Use {fileName} as a placeholder for the file name."
+        },
+        "aggregateOpenTabs.autoSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically save the aggregated file."
+        },
+        "aggregateOpenTabs.autoSavePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path where aggregated files will be saved if autoSave is enabled. Leave empty to save in the workspace root."
+        },
+        "aggregateOpenTabs.includeFileTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "List of file extensions to include (e.g., [\".ts\", \".js\"]). Leave empty to include all files."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^16.x",
+    "@types/vscode": "^1.74.0",
+    "typescript": "^4.x"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/vscode-aggregate-open-tabs.git"
+  },
+  "publisher": "your-publisher-name"
+}
