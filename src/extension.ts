@@ -273,9 +273,16 @@ class PreviewPanel {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-    // Initialize providers and managers
-    treeDataProvider = new AggregateTreeProvider();
     storageManager = new StorageManager(context);
+    treeDataProvider = new AggregateTreeProvider();
+
+    // Register commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('extension.aggregateOpenTabs', () => aggregateFiles(false)),
+        vscode.commands.registerCommand('extension.selectiveAggregate', () => aggregateFiles(true)),
+        vscode.commands.registerCommand('extension.togglePreview', () => PreviewPanel.createOrShow(context.extensionUri)),
+        vscode.commands.registerCommand('extension.copyAggregatedContent', copyAggregatedContent)
+    );
 
     // Register tree view
     const treeView = vscode.window.createTreeView('aggregateOpenTabsView', {
@@ -283,22 +290,7 @@ export async function activate(context: vscode.ExtensionContext) {
         dragAndDropController: treeDataProvider
     });
 
-    // Register commands
-    const commands = [
-        vscode.commands.registerCommand('extension.aggregateOpenTabs', () => aggregateFiles()),
-        vscode.commands.registerCommand('extension.selectiveAggregate', () => aggregateFiles(true)),
-        vscode.commands.registerCommand('extension.refreshAggregateView', () => treeDataProvider.refresh()),
-        vscode.commands.registerCommand('extension.copyAggregatedContent', copyAggregatedContent),
-        vscode.commands.registerCommand('extension.openInNewWindow', () => openInNewWindow()),
-        vscode.commands.registerCommand('extension.uploadToGist', () => storageManager.uploadToGist()),
-        vscode.commands.registerCommand('extension.saveSnapshot', () => storageManager.saveSnapshot()),
-        vscode.commands.registerCommand('extension.loadSnapshot', () => storageManager.loadSnapshot()),
-        vscode.commands.registerCommand('extension.togglePreview', () => {
-            PreviewPanel.createOrShow(context.extensionUri);
-        })
-    ];
-
-    context.subscriptions.push(treeView, ...commands);
+    context.subscriptions.push(treeView);
 
     // Show preview panel on startup if configured
     if (vscode.workspace.getConfiguration('aggregateOpenTabs').get('showPreviewOnStartup')) {
@@ -484,10 +476,54 @@ async function showAggregatedContent(content: string, format: string): Promise<v
 }
 
 async function copyAggregatedContent(): Promise<void> {
-    const editor = vscode.window.activeTextEditor;
-    if (editor) {
-        await vscode.env.clipboard.writeText(editor.document.getText());
-        vscode.window.showInformationMessage('Content copied to clipboard!');
+    try {
+        const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
+        const openFiles = vscode.workspace.textDocuments.filter(doc => 
+            !doc.isUntitled && 
+            !doc.uri.scheme.startsWith('output') &&
+            !doc.uri.scheme.startsWith('debug') &&
+            doc.uri.scheme === 'file'
+        );
+
+        if (openFiles.length === 0) {
+            vscode.window.showInformationMessage('No files open to aggregate.');
+            return;
+        }
+
+        const fileMetadata = (await Promise.all(
+            openFiles.map(async doc => {
+                try {
+                    return getFileMetadata(doc.fileName, doc.getText(), doc.languageId);
+                } catch (error) {
+                    console.error(`Error processing ${doc.fileName}:`, error);
+                    return null;
+                }
+            })
+        )).filter((file): file is FileMetadata => file !== null);
+
+        const formatter = createFormatter(
+            config.get<string>('outputFormat', 'markdown'),
+            { 
+                extraSpacing: config.get<boolean>('extraSpacing', true),
+                enhancedSummaries: config.get<boolean>('enhancedSummaries', true),
+                chunkSize: config.get<number>('chunkSize', 2000),
+                chunkSeparatorStyle: config.get<'double' | 'single' | 'minimal'>('chunkSeparatorStyle', 'double'),
+                codeFenceLanguageMap: config.get<Record<string, string>>('codeFenceLanguageMap', {}),
+                tailoredSummaries: config.get<boolean>('tailoredSummaries', true),
+                includeKeyPoints: config.get<boolean>('includeKeyPoints', true),
+                includeImports: config.get<boolean>('includeImports', true),
+                includeExports: config.get<boolean>('includeExports', true),
+                includeDependencies: config.get<boolean>('includeDependencies', true),
+                aiSummaryStyle: config.get<'concise' | 'detailed'>('aiSummaryStyle', 'concise'),
+                useCodeFences: config.get<boolean>('useCodeFences', true)
+            }
+        );
+        const content = await formatter.format(fileMetadata);
+        
+        await vscode.env.clipboard.writeText(content);
+        vscode.window.showInformationMessage('Aggregated content copied to clipboard!');
+    } catch (error) {
+        vscode.window.showErrorMessage(`Error copying content: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 

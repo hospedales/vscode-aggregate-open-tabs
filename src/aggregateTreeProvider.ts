@@ -182,6 +182,20 @@ export class AggregateTreeProvider implements
         previewItem.iconPath = new vscode.ThemeIcon('preview');
         items.push(previewItem);
 
+        // Add copy button
+        const copyItem = new AggregateTreeItem(
+            "Copy to Clipboard",
+            vscode.TreeItemCollapsibleState.None,
+            undefined,
+            {
+                command: 'extension.copyAggregatedContent',
+                title: 'Copy to Clipboard',
+                tooltip: 'Copy aggregated content to clipboard'
+            }
+        );
+        copyItem.iconPath = new vscode.ThemeIcon('copy');
+        items.push(copyItem);
+
         // Add main aggregate command with file count
         items.push(new AggregateTreeItem(
             `Aggregate ${stats.totalFiles} Open Files`,
