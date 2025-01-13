@@ -40,8 +40,8 @@ export class FileTreeItem extends vscode.TreeItem {
             }
         }
 
-        if (this.metadata?.summary) {
-            parts.push(this.metadata.summary);
+        if (this.metadata?.analysis?.aiSummary) {
+            parts.push(this.metadata.analysis.aiSummary);
         }
 
         return parts.join('\n');

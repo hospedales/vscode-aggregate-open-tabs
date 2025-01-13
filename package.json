@@ -218,6 +218,30 @@
           "type": "boolean",
           "default": true,
           "description": "Add extra blank lines around code blocks and sections for better readability."
+        },
+        "aggregateOpenTabs.includeAISummaries": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include AI-generated summaries and key points for each file."
+        },
+        "aggregateOpenTabs.aiSummaryStyle": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "detailed"
+          ],
+          "default": "concise",
+          "description": "Style of AI-generated summaries (concise or detailed)."
+        },
+        "aggregateOpenTabs.includeKeyPoints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include key points about file functionality (API calls, state management, etc.)."
+        },
+        "aggregateOpenTabs.includeImports": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include import statements in file summaries."
         }
       }
     }

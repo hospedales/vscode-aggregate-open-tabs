@@ -1,45 +1,75 @@
-import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as vscode from 'vscode';
+
+export interface FileAnalysis {
+    purpose?: string;
+    frameworks: string[];
+    dependencies: string[];
+    imports: string[];
+    exports: string[];
+    aiSummary?: string;
+    keyPoints?: string[];
+}
 
 export interface FileMetadata {
     fileName: string;
-    relativePath: string;
-    languageId: string;
+    relativePath?: string;
+    content: string;
     size: number;
     lastModified: string;
-    content: string;
-    workspace?: string;
-    summary?: string;
-    analysis?: {
-        frameworks: string[];
-        purpose: string;
-        dependencies: string[];
-        exports: string[];
-        imports: string[];
-    };
+    languageId: string;
     chunkInfo?: string;
+    analysis?: FileAnalysis;
 }
 
-export interface FileTypeCount {
-    [key: string]: number;
+export interface FileChunk {
+    content: string;
+    startLine: number;
+    endLine: number;
+    analysis?: {
+        aiSummary?: string;
+        keyPoints?: string[];
+    };
 }
 
-export function getFileMetadata(document: vscode.TextDocument): FileMetadata {
-    const stats = fs.statSync(document.fileName);
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+export interface FormatOptions {
+    extraSpacing: boolean;
+    enhancedSummaries: boolean;
+    chunkSize: number;
+    includeAiSummaries?: boolean;
+    includeKeyPoints?: boolean;
+    includeImports?: boolean;
+    includeExports?: boolean;
+    includeDependencies?: boolean;
+}
+
+export function getFileMetadata(filePath: string, content: string, languageId: string): FileMetadata {
+    const stats = fs.statSync(filePath);
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    
+    // Normalize paths and ensure they use forward slashes
+    const normalizedWorkspace = path.normalize(workspaceRoot).split(path.sep).join('/');
+    const normalizedFilePath = path.normalize(filePath).split(path.sep).join('/');
+    
+    // Get the relative path by removing the workspace root
+    const relativePath = normalizedFilePath.startsWith(normalizedWorkspace) 
+        ? normalizedFilePath.slice(normalizedWorkspace.length + 1) 
+        : path.relative(normalizedWorkspace, normalizedFilePath).split(path.sep).join('/');
     
     return {
-        fileName: document.fileName,
-        relativePath: workspaceFolder 
-            ? path.relative(workspaceFolder.uri.fsPath, document.fileName)
-            : path.basename(document.fileName),
-        languageId: document.languageId,
-        workspace: workspaceFolder?.name,
+        fileName: path.basename(filePath),
+        relativePath,
+        content,
         size: stats.size,
         lastModified: stats.mtime.toISOString(),
-        content: document.getText(),
-        summary: generateFileSummary(document)
+        languageId,
+        analysis: {
+            frameworks: [],
+            dependencies: [],
+            imports: [],
+            exports: []
+        }
     };
 }
 
@@ -48,128 +78,83 @@ export function formatBytes(bytes: number): string {
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }
 
-export function generateTableOfContents(files: FileMetadata[]): string {
-    let toc = '//=============================================================================\n';
-    toc += '// TABLE OF CONTENTS\n';
-    toc += '//=============================================================================\n\n';
-    
-    files.forEach((file, index) => {
-        const workspace = file.workspace ? ` (${file.workspace})` : '';
-        toc += `// ${index + 1}. ${file.relativePath}${workspace}\n`;
-        toc += `//    Language: ${file.languageId}, Size: ${formatBytes(file.size)}\n`;
-        if (file.summary) {
-            toc += `//    Summary: ${file.summary}\n`;
-        }
-    });
-    
-    toc += '\n//=============================================================================\n\n';
-    return toc;
-}
-
-export function generateFileHeader(file: FileMetadata): string {
-    const workspace = file.workspace ? ` (${file.workspace})` : '';
-    let header = '//=============================================================================\n';
-    header += `// File: ${file.relativePath}${workspace}\n`;
-    header += `// Language: ${file.languageId}\n`;
-    header += `// Size: ${formatBytes(file.size)}\n`;
-    header += `// Last Modified: ${file.lastModified}\n`;
-    if (file.summary) {
-        header += `// Summary: ${file.summary}\n`;
-    }
-    header += '//=============================================================================\n\n';
-    
-    // Add language-specific code fence
-    if (file.languageId !== 'plaintext') {
-        header += '```' + file.languageId + '\n';
-    }
-    
-    return header;
-}
-
-export function generateFileFooter(file: FileMetadata): string {
-    let footer = '';
-    if (file.languageId !== 'plaintext') {
-        footer = '\n```\n';
-    }
-    footer += '\n//=============================================================================\n\n';
-    return footer;
-}
-
-export function generateFileSummary(document: vscode.TextDocument): string {
-    const content = document.getText();
-    const lines = content.split('\n');
-    
-    // Look for common patterns to generate a basic summary
-    const patterns = {
-        exports: /export\s+(default\s+)?(function|class|const|interface)\s+(\w+)/g,
-        imports: /import\s+.*?from\s+['"].*?['"]/g,
-        functions: /function\s+\w+\s*\(/g,
-        classes: /class\s+\w+/g,
-        components: /function\s+\w+\s*\(.*?\)\s*:\s*.*?React/g
+export function getLanguageFromPath(filePath: string): string {
+    const ext = path.extname(filePath).toLowerCase();
+    const languageMap: { [key: string]: string } = {
+        '.js': 'javascript',
+        '.jsx': 'javascriptreact',
+        '.ts': 'typescript',
+        '.tsx': 'typescriptreact',
+        '.py': 'python',
+        '.java': 'java',
+        '.c': 'c',
+        '.cpp': 'cpp',
+        '.cs': 'csharp',
+        '.go': 'go',
+        '.rs': 'rust',
+        '.rb': 'ruby',
+        '.php': 'php',
+        '.swift': 'swift',
+        '.kt': 'kotlin',
+        '.scala': 'scala',
+        '.m': 'objective-c',
+        '.h': 'c',
+        '.json': 'json',
+        '.xml': 'xml',
+        '.yaml': 'yaml',
+        '.yml': 'yaml',
+        '.md': 'markdown',
+        '.css': 'css',
+        '.scss': 'scss',
+        '.less': 'less',
+        '.html': 'html',
+        '.sql': 'sql',
+        '.sh': 'shell',
+        '.bash': 'shell',
+        '.zsh': 'shell',
+        '.ps1': 'powershell'
     };
-
-    const summary = [];
-    
-    // Count occurrences
-    const exports = [...content.matchAll(patterns.exports)].length;
-    const imports = [...content.matchAll(patterns.imports)].length;
-    const functions = [...content.matchAll(patterns.functions)].length;
-    const classes = [...content.matchAll(patterns.classes)].length;
-    const components = [...content.matchAll(patterns.components)].length;
-
-    if (exports > 0) summary.push(`${exports} exports`);
-    if (imports > 0) summary.push(`${imports} imports`);
-    if (functions > 0) summary.push(`${functions} functions`);
-    if (classes > 0) summary.push(`${classes} classes`);
-    if (components > 0) summary.push(`${components} React components`);
-
-    // Add line count
-    summary.push(`${lines.length} lines`);
-
-    return summary.join(', ');
+    return languageMap[ext] || 'plaintext';
 }
 
-export function chunkContent(content: string, chunkSize: number): string[] {
-    if (chunkSize <= 0) return [content];
-    
-    const lines = content.split('\n');
-    const chunks: string[] = [];
-    let currentChunk: string[] = [];
-    
-    for (let i = 0; i < lines.length; i++) {
-        currentChunk.push(lines[i]);
-        
-        if (currentChunk.length >= chunkSize || i === lines.length - 1) {
-            chunks.push(currentChunk.join('\n'));
-            currentChunk = [];
-        }
-    }
-    
-    return chunks;
+export function getFileExtension(fileName: string): string {
+    return path.extname(fileName).toLowerCase();
 }
 
-export async function openInNewWindow(content: string, language: string): Promise<void> {
-    // Create a temporary file
-    const tmpDir = path.join(vscode.workspace.rootPath || '', '.vscode', 'tmp');
-    if (!fs.existsSync(tmpDir)) {
-        fs.mkdirSync(tmpDir, { recursive: true });
-    }
-    
-    const tmpFile = path.join(tmpDir, `aggregated-${Date.now()}.${language}`);
-    fs.writeFileSync(tmpFile, content);
-    
-    // Open new window with the file
-    await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(tmpFile), true);
+export function isTextFile(fileName: string): boolean {
+    const ext = getFileExtension(fileName);
+    const binaryExtensions = [
+        '.pdf', '.doc', '.docx', '.xls', '.xlsx',
+        '.zip', '.tar', '.gz', '.7z', '.rar',
+        '.exe', '.dll', '.so', '.dylib',
+        '.jpg', '.jpeg', '.png', '.gif', '.bmp',
+        '.mp3', '.mp4', '.avi', '.mov',
+        '.ttf', '.otf', '.woff', '.woff2'
+    ];
+    return !binaryExtensions.includes(ext);
 }
 
-export function shouldExcludeFile(document: vscode.TextDocument): boolean {
-    const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
-    const excludePatterns = config.get<string[]>('excludePatterns') || [];
-    
-    return excludePatterns.some(pattern => 
-        new RegExp(pattern.replace(/\*/g, '.*')).test(document.fileName)
-    );
+export function shouldIgnoreFile(fileName: string): boolean {
+    const ignorePatterns = [
+        /node_modules/,
+        /\.git/,
+        /\.svn/,
+        /\.hg/,
+        /\.DS_Store/,
+        /Thumbs\.db/,
+        /\.env/,
+        /\.vscode/,
+        /\.idea/,
+        /\.vs/,
+        /dist/,
+        /build/,
+        /coverage/,
+        /\.next/,
+        /\.nuxt/,
+        /\.output/
+    ];
+    return ignorePatterns.some(pattern => pattern.test(fileName));
 } 

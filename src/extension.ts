@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { FileMetadata, getFileMetadata } from './utils';
+import { FileMetadata, getFileMetadata, shouldIgnoreFile } from './utils';
 import { createFormatter } from './formatters';
 import { selectFilesToAggregate } from './selectiveAggregation';
 import { detectSensitiveData, redactSensitiveData } from './security';
@@ -46,29 +46,31 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
         const outputFormat = config.get<string>('outputFormat', 'plaintext');
         const extraSpacing = config.get<boolean>('extraSpacing', true);
         const enhancedSummaries = config.get<boolean>('enhancedSummaries', true);
+        const includeAISummaries = config.get<boolean>('includeAISummaries', true);
 
         // Get open documents
-        let documents = vscode.workspace.textDocuments.filter(doc => 
-            !doc.isUntitled && 
-            !doc.uri.scheme.startsWith('output') &&
-            !doc.uri.scheme.startsWith('debug') &&
-            doc.uri.scheme === 'file'
-        );
+        let openFiles = vscode.workspace.textDocuments
+            .filter(doc => 
+                !doc.isUntitled && 
+                !doc.uri.scheme.startsWith('debug') &&
+                doc.uri.scheme === 'file' &&
+                !shouldIgnoreFile(doc.fileName)
+            );
 
         // Apply selective aggregation if requested
         if (selective) {
-            const selectedDocs = await selectFilesToAggregate(documents);
+            const selectedDocs = await selectFilesToAggregate(openFiles);
             if (!selectedDocs) {
                 return;
             }
-            documents = selectedDocs;
+            openFiles = selectedDocs;
         }
 
         // Process each document
         const fileMetadata = (await Promise.all(
-            documents.map(async doc => {
+            openFiles.map(async doc => {
                 try {
-                    const metadata = await getFileMetadata(doc);
+                    const metadata = await getFileMetadata(doc.fileName, doc.getText(), doc.languageId);
                     
                     // Check for sensitive data
                     if (sensitiveDataHandling !== 'ignore') {
@@ -99,7 +101,12 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
 
                     // Analyze file for enhanced summaries
                     if (enhancedSummaries) {
-                        metadata.analysis = await analyzeFile(doc);
+                        const analysis = await analyzeFile(doc);
+                        metadata.analysis = {
+                            ...analysis,
+                            aiSummary: includeAISummaries ? analysis.aiSummary : undefined,
+                            keyPoints: includeAISummaries ? analysis.keyPoints : undefined
+                        };
                     }
 
                     return metadata;
@@ -116,7 +123,11 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
         }
 
         // Create formatter and generate content
-        const formatter = createFormatter(outputFormat, { extraSpacing, enhancedSummaries, chunkSize });
+        const formatter = createFormatter(outputFormat, { 
+            extraSpacing, 
+            enhancedSummaries, 
+            chunkSize 
+        });
         const content = await formatter.format(fileMetadata);
 
         // Show aggregated content
@@ -129,6 +140,11 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
         if (config.get<boolean>('autoSave', false)) {
             const autoSavePath = config.get<string>('autoSavePath', '');
             await saveAggregatedContent(content, autoSavePath);
+        }
+
+        // Save snapshot if enabled
+        if (config.get<boolean>('keepSnapshots', true)) {
+            await storageManager.saveSnapshot(content);
         }
 
     } catch (error) {
@@ -145,7 +161,33 @@ async function showAggregatedContent(content: string, format: string): Promise<v
     if (vscode.workspace.getConfiguration('aggregateOpenTabs').get<boolean>('openInNewWindow', false)) {
         await openInNewWindow(document);
     } else {
-        await vscode.window.showTextDocument(document, { preview: false });
+        const editor = await vscode.window.showTextDocument(document, { 
+            preview: false,
+            viewColumn: vscode.ViewColumn.Beside 
+        });
+
+        // Add folding regions for better navigation
+        if (format === 'plaintext') {
+            const foldingRanges = content.split('\n').reduce((ranges, line, index) => {
+                if (line.startsWith('//=============================================================================')) {
+                    if (ranges.length > 0 && ranges[ranges.length - 1].start !== undefined) {
+                        ranges[ranges.length - 1].end = index - 1;
+                    }
+                    ranges.push({ start: index });
+                }
+                return ranges;
+            }, [] as { start: number; end?: number }[]);
+
+            if (foldingRanges.length > 0) {
+                editor.setDecorations(vscode.window.createTextEditorDecorationType({
+                    isWholeLine: true,
+                    backgroundColor: new vscode.ThemeColor('editor.foldBackground')
+                }), foldingRanges.map(range => new vscode.Range(
+                    range.start, 0,
+                    range.end || content.split('\n').length - 1, 0
+                )));
+            }
+        }
     }
 }
 

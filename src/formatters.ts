@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import * as path from 'path';
 import { FileMetadata } from './utils';
 
@@ -16,9 +15,8 @@ abstract class BaseFormatter {
     protected abstract generateFileFooter(metadata: FileMetadata): string;
     protected abstract wrapContent(content: string, metadata: FileMetadata): string;
 
-    protected getRelativePath(filePath: string): string {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        return workspaceRoot ? path.relative(workspaceRoot, filePath) : filePath;
+    protected getRelativePath(file: FileMetadata): string {
+        return file.relativePath || file.fileName;
     }
 
     protected getLanguageSpecificInfo(metadata: FileMetadata): string {
@@ -98,89 +96,289 @@ abstract class BaseFormatter {
 export class PlainTextFormatter extends BaseFormatter {
     protected generateTableOfContents(files: FileMetadata[]): string {
         const lines = ['Table of Contents:', '=================='];
+        let currentDir = '';
         
         for (const file of files) {
-            const relativePath = this.getRelativePath(file.fileName);
-            const langInfo = this.getLanguageSpecificInfo(file);
-            lines.push(`${relativePath}${langInfo ? ` (${langInfo})` : ''}`);
+            const relativePath = this.getRelativePath(file);
+            const dir = path.dirname(relativePath);
             
-            if (this.options.enhancedSummaries && file.analysis?.purpose) {
-                lines.push(`  Purpose: ${file.analysis.purpose}`);
-                if (file.analysis.exports.length > 0) {
-                    lines.push(`  Exports: ${file.analysis.exports.join(', ')}`);
+            // Start a new directory section if needed
+            if (dir !== currentDir) {
+                if (dir !== '.') {
+                    lines.push(`\n[${dir}]`);
+                }
+                currentDir = dir;
+            }
+            
+            const indent = dir === '.' ? '' : '  ';
+            const langInfo = this.getLanguageSpecificInfo(file);
+            const fileName = path.basename(relativePath);
+            
+            lines.push(`${indent}${fileName}${langInfo ? ` (${langInfo})` : ''}`);
+            
+            if (this.options.enhancedSummaries && file.analysis) {
+                const metadata = [];
+                if (file.analysis.purpose) {
+                    metadata.push(`Purpose: ${file.analysis.purpose}`);
+                }
+                if (file.analysis.frameworks?.length) {
+                    metadata.push(`Uses: ${file.analysis.frameworks.join(', ')}`);
+                }
+                if (metadata.length) {
+                    lines.push(`${indent}  ${metadata.join(' | ')}`);
+                }
+                
+                if (file.analysis.aiSummary) {
+                    lines.push(`${indent}  Summary: ${file.analysis.aiSummary}`);
+                }
+                if (file.analysis.keyPoints?.length) {
+                    lines.push(`${indent}  Key Points:`);
+                    file.analysis.keyPoints.forEach(point => {
+                        lines.push(`${indent}    • ${point}`);
+                    });
                 }
             }
         }
-
+        
         return lines.join('\n') + '\n';
     }
 
     protected generateFileHeader(metadata: FileMetadata): string {
-        const relativePath = this.getRelativePath(metadata.fileName);
+        const relativePath = this.getRelativePath(metadata);
         const langInfo = this.getLanguageSpecificInfo(metadata);
         
-        return [
+        const lines = [
             '//=============================================================================',
             `// File: ${relativePath}${metadata.chunkInfo || ''}`,
+            '//=============================================================================',
+            '',
+            '// File Metadata',
+            '// -------------',
             `// Language: ${metadata.languageId}${langInfo ? ` | ${langInfo}` : ''}`,
-            `// Size: ${metadata.size} bytes | Last Modified: ${metadata.lastModified}`,
-            metadata.analysis?.purpose ? `// Purpose: ${metadata.analysis.purpose}` : '',
-            '//=============================================================================\n'
-        ].filter(Boolean).join('\n');
+            `// Size: ${metadata.size} bytes`,
+            `// Last Modified: ${metadata.lastModified}`
+        ];
+
+        if (metadata.analysis) {
+            if (metadata.analysis.purpose) {
+                lines.push(`// Purpose: ${metadata.analysis.purpose}`);
+            }
+            if (metadata.analysis.frameworks?.length) {
+                lines.push(`// Frameworks: ${metadata.analysis.frameworks.join(', ')}`);
+            }
+            if (metadata.analysis.dependencies?.length) {
+                lines.push(`// Dependencies: ${metadata.analysis.dependencies.join(', ')}`);
+            }
+            if (metadata.analysis.imports?.length) {
+                lines.push(`// Imports: ${metadata.analysis.imports.join(', ')}`);
+            }
+            if (metadata.analysis.exports?.length) {
+                lines.push(`// Exports: ${metadata.analysis.exports.join(', ')}`);
+            }
+
+            if (metadata.analysis.aiSummary || metadata.analysis.keyPoints?.length) {
+                lines.push('',
+                    '// AI Analysis',
+                    '// -----------');
+                if (metadata.analysis.aiSummary) {
+                    lines.push(`// Summary: ${metadata.analysis.aiSummary}`);
+                }
+                if (metadata.analysis.keyPoints?.length) {
+                    lines.push('// Key Points:');
+                    metadata.analysis.keyPoints.forEach(point => {
+                        lines.push(`//   • ${point}`);
+                    });
+                }
+            }
+        }
+
+        lines.push('',
+            '//=============================================================================',
+            '');
+        
+        return lines.join('\n');
     }
 
     protected generateFileFooter(_metadata: FileMetadata): string {
         return '\n//=============================================================================\n';
     }
 
-    protected wrapContent(content: string, _metadata: FileMetadata): string {
-        return content;
+    protected wrapContent(content: string, metadata: FileMetadata): string {
+        if (!this.options.chunkSize || this.options.chunkSize <= 0) {
+            return content;
+        }
+
+        const chunks = this.chunkContent(content);
+        if (chunks.length <= 1) {
+            return content;
+        }
+
+        // If content is chunked, add chunk headers
+        const lines: string[] = [];
+        chunks.forEach((chunk, index) => {
+            const start = index * this.options.chunkSize + 1;
+            const end = Math.min(start + chunk.split('\n').length - 1, metadata.content.split('\n').length);
+            
+            lines.push(`//-----------------------------------------------------------------------------`,
+                `// Chunk ${index + 1}: Lines ${start}-${end}`,
+                `//-----------------------------------------------------------------------------\n`);
+            lines.push(chunk);
+            if (index < chunks.length - 1) {
+                lines.push('\n');
+            }
+        });
+
+        return lines.join('\n');
     }
 }
 
 export class MarkdownFormatter extends BaseFormatter {
     protected generateTableOfContents(files: FileMetadata[]): string {
         const lines = ['# Table of Contents\n'];
+        let currentDir = '';
         
         for (const file of files) {
-            const relativePath = this.getRelativePath(file.fileName);
-            const langInfo = this.getLanguageSpecificInfo(file);
-            lines.push(`- \`${relativePath}\`${langInfo ? ` (${langInfo})` : ''}`);
+            const relativePath = this.getRelativePath(file);
+            const dir = path.dirname(relativePath);
             
-            if (this.options.enhancedSummaries && file.analysis?.purpose) {
-                lines.push(`  - Purpose: ${file.analysis.purpose}`);
-                if (file.analysis.exports.length > 0) {
-                    lines.push(`  - Exports: ${file.analysis.exports.join(', ')}`);
+            // Start a new directory section if needed
+            if (dir !== currentDir) {
+                if (currentDir !== '') {
+                    lines.push('</details>\n');
+                }
+                if (dir !== '.') {
+                    lines.push(`<details open><summary>📁 ${dir}/</summary>\n`);
+                }
+                currentDir = dir;
+            }
+            
+            const indent = dir === '.' ? '' : '  ';
+            const fileName = path.basename(relativePath);
+            const fileLink = `${indent}- [${fileName}](#${this.slugify(relativePath)})`;
+            
+            const metadata = [];
+            if (file.analysis?.purpose) {
+                metadata.push(file.analysis.purpose);
+            }
+            if (file.analysis?.frameworks?.length) {
+                metadata.push(`Uses: ${file.analysis.frameworks.join(', ')}`);
+            }
+            
+            lines.push(metadata.length ? `${fileLink} *(${metadata.join(' | ')})* ` : fileLink);
+            
+            if (this.options.enhancedSummaries && file.analysis) {
+                if (file.analysis.aiSummary) {
+                    lines.push(`${indent}  - ${file.analysis.aiSummary}`);
+                }
+                if (file.analysis.keyPoints?.length) {
+                    lines.push(`${indent}  <details><summary>Key Points</summary>\n`);
+                    file.analysis.keyPoints.forEach(point => {
+                        lines.push(`${indent}    - ${point}`);
+                    });
+                    lines.push(`${indent}  </details>`);
                 }
             }
         }
+        
+        // Close the last directory section if needed
+        if (currentDir !== '.') {
+            lines.push('</details>\n');
+        }
+        
+        return lines.join('\n');
+    }
 
-        return lines.join('\n') + '\n';
+    protected slugify(text: string): string {
+        return text
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/(^-|-$)/g, '');
     }
 
     protected generateFileHeader(metadata: FileMetadata): string {
-        const relativePath = this.getRelativePath(metadata.fileName);
+        const relativePath = this.getRelativePath(metadata);
         const langInfo = this.getLanguageSpecificInfo(metadata);
         
-        return [
+        const lines = [
             `## ${relativePath}${metadata.chunkInfo || ''}`,
-            '',
-            '| Property | Value |',
-            '|----------|--------|',
-            `| Language | ${metadata.languageId}${langInfo ? ` (${langInfo})` : ''} |`,
-            `| Size | ${metadata.size} bytes |`,
-            `| Last Modified | ${metadata.lastModified} |`,
-            metadata.analysis?.purpose ? `| Purpose | ${metadata.analysis.purpose} |` : '',
-            '\n'
-        ].filter(Boolean).join('\n');
+            ''
+        ];
+
+        // Add metadata in a collapsible section
+        lines.push('<details><summary>File Metadata</summary>\n');
+        lines.push('| Property | Value |');
+        lines.push('|----------|--------|');
+        lines.push(`| Language | ${metadata.languageId}${langInfo ? ` (${langInfo})` : ''} |`);
+        lines.push(`| Size | ${metadata.size} bytes |`);
+        lines.push(`| Last Modified | ${metadata.lastModified} |`);
+
+        if (metadata.analysis) {
+            if (metadata.analysis.purpose) {
+                lines.push(`| Purpose | ${metadata.analysis.purpose} |`);
+            }
+            if (metadata.analysis.frameworks?.length) {
+                lines.push(`| Frameworks | ${metadata.analysis.frameworks.join(', ')} |`);
+            }
+            if (metadata.analysis.dependencies?.length) {
+                lines.push(`| Dependencies | ${metadata.analysis.dependencies.join(', ')} |`);
+            }
+            if (metadata.analysis.imports?.length) {
+                lines.push(`| Imports | ${metadata.analysis.imports.join(', ')} |`);
+            }
+            if (metadata.analysis.exports?.length) {
+                lines.push(`| Exports | ${metadata.analysis.exports.join(', ')} |`);
+            }
+        }
+        lines.push('\n</details>\n');
+
+        // Add AI summary and key points if available
+        if (metadata.analysis?.aiSummary || metadata.analysis?.keyPoints?.length) {
+            lines.push('<details><summary>AI Analysis</summary>\n');
+            if (metadata.analysis.aiSummary) {
+                lines.push(`**Summary**: ${metadata.analysis.aiSummary}\n`);
+            }
+            if (metadata.analysis.keyPoints?.length) {
+                lines.push('**Key Points**:');
+                metadata.analysis.keyPoints.forEach(point => {
+                    lines.push(`- ${point}`);
+                });
+            }
+            lines.push('\n</details>\n');
+        }
+
+        // Add code block header
+        lines.push(`\`\`\`${metadata.languageId}`);
+        
+        return lines.join('\n');
     }
 
     protected generateFileFooter(_metadata: FileMetadata): string {
-        return '\n---\n';
+        return '```\n';
     }
 
     protected wrapContent(content: string, metadata: FileMetadata): string {
-        return `\`\`\`${metadata.languageId}\n${content}\n\`\`\``;
+        if (!this.options.chunkSize || this.options.chunkSize <= 0) {
+            return content;
+        }
+
+        const chunks = this.chunkContent(content);
+        if (chunks.length <= 1) {
+            return content;
+        }
+
+        // If content is chunked, wrap each chunk in a collapsible section
+        const lines: string[] = [];
+        chunks.forEach((chunk, index) => {
+            const start = index * this.options.chunkSize + 1;
+            const end = Math.min(start + chunk.split('\n').length - 1, metadata.content.split('\n').length);
+            
+            lines.push(`<details${index === 0 ? ' open' : ''}><summary>Chunk ${index + 1}: Lines ${start}-${end}</summary>\n`);
+            lines.push(`\`\`\`${metadata.languageId}`);
+            lines.push(chunk);
+            lines.push('```\n</details>\n');
+        });
+
+        return lines.join('\n');
     }
 }
 
@@ -189,7 +387,7 @@ export class HtmlFormatter extends BaseFormatter {
         const lines = ['<h1>Table of Contents</h1>', '<ul>'];
         
         for (const file of files) {
-            const relativePath = this.getRelativePath(file.fileName);
+            const relativePath = this.getRelativePath(file);
             const langInfo = this.getLanguageSpecificInfo(file);
             lines.push(`<li><code>${relativePath}</code>${langInfo ? ` (${langInfo})` : ''}`);
             
@@ -210,7 +408,7 @@ export class HtmlFormatter extends BaseFormatter {
     }
 
     protected generateFileHeader(metadata: FileMetadata): string {
-        const relativePath = this.getRelativePath(metadata.fileName);
+        const relativePath = this.getRelativePath(metadata);
         const langInfo = this.getLanguageSpecificInfo(metadata);
         
         return [

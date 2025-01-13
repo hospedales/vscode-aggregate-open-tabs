@@ -24,22 +24,31 @@ export class StorageManager {
         this.maxSnapshots = config.get<number>('maxSnapshots', 10);
     }
 
-    async saveSnapshot(): Promise<void> {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            vscode.window.showWarningMessage('No active editor to save snapshot from.');
-            return;
+    async saveSnapshot(content?: string): Promise<void> {
+        let snapshotContent: string;
+        let language: string;
+
+        if (content) {
+            snapshotContent = content;
+            language = 'plaintext';
+        } else {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                vscode.window.showWarningMessage('No active editor to save snapshot from.');
+                return;
+            }
+            snapshotContent = editor.document.getText();
+            language = editor.document.languageId;
         }
 
-        const content = editor.document.getText();
         const snapshot: Snapshot = {
             id: Date.now().toString(),
             timestamp: new Date().toISOString(),
-            content,
+            content: snapshotContent,
             files: vscode.workspace.textDocuments
                 .filter(doc => !doc.isUntitled && doc.uri.scheme === 'file')
                 .map(doc => doc.fileName),
-            language: editor.document.languageId
+            language
         };
 
         const snapshots: Snapshot[] = this.context.globalState.get<Snapshot[]>(this.snapshotsKey, []);
