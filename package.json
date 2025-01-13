@@ -44,7 +44,14 @@
             "type": "string"
           },
           "default": [],
-          "description": "List of file extensions to include (e.g., [\".ts\", \".js\"]). Leave empty to include all files."
+          "description": "List of file extensions to include (e.g., [\".ts\", \".js\"]). Leave empty [] or set to [\"*\"] to include all file types.",
+          "examples": [
+            [],
+            ["*"],
+            [".ts", ".js", ".tsx"],
+            [".py", ".ipynb"],
+            [".java", ".kt"]
+          ]
         }
       }
     }

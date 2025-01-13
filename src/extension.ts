@@ -27,13 +27,16 @@ export function activate(context: vscode.ExtensionContext) {
 
                 if (!isValidDoc) return false;
 
-                // Check file extension if includeFileTypes is specified
-                if (includeFileTypes && includeFileTypes.length > 0) {
-                    const fileExt = path.extname(doc.fileName).toLowerCase();
-                    return includeFileTypes.includes(fileExt);
+                // Include all files if includeFileTypes is empty or contains "*"
+                if (!includeFileTypes || 
+                    includeFileTypes.length === 0 || 
+                    includeFileTypes.includes('*')) {
+                    return true;
                 }
 
-                return true;
+                // Check file extension if specific types are specified
+                const fileExt = path.extname(doc.fileName).toLowerCase();
+                return includeFileTypes.includes(fileExt);
             });
             
             if (validDocuments.length === 0) {
