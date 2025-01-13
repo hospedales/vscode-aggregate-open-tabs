@@ -112,13 +112,13 @@ abstract class BaseFormatter {
                 };
 
                 const section = [
-                    this.options.extraSpacing ? '\n' : '',
+                    this.options.extraSpacing ? '\n\n' : '\n',
                     this.generateFileHeader(chunkMeta),
-                    this.options.extraSpacing ? '\n' : '',
+                    this.options.extraSpacing ? '\n\n' : '\n',
                     this.wrapContent(chunks[i], chunkMeta),
-                    this.options.extraSpacing ? '\n' : '',
+                    this.options.extraSpacing ? '\n\n' : '\n',
                     this.generateFileFooter(chunkMeta),
-                    this.options.extraSpacing ? '\n' : ''
+                    this.options.extraSpacing ? '\n\n' : '\n'
                 ].join('');
 
                 sections.push(section);
@@ -259,7 +259,7 @@ export class PlainTextFormatter extends BaseFormatter {
 
         lines.push('',
             `//${separator}`,
-            '');
+            this.options.extraSpacing ? '\n' : '');
         
         return lines.join('\n');
     }
@@ -273,7 +273,7 @@ export class PlainTextFormatter extends BaseFormatter {
         if (!this.options.chunkSize || this.options.chunkSize <= 0) {
             if (this.options.useCodeFences) {
                 const langId = this.getLanguageIdentifier(metadata.languageId);
-                return `\`\`\`${langId}\n${content}\n\`\`\``;
+                return `${this.options.extraSpacing ? '\n' : ''}\`\`\`${langId}\n${content}\n\`\`\`${this.options.extraSpacing ? '\n' : ''}`;
             }
             return content;
         }
@@ -282,7 +282,7 @@ export class PlainTextFormatter extends BaseFormatter {
         if (chunks.length <= 1) {
             if (this.options.useCodeFences) {
                 const langId = this.getLanguageIdentifier(metadata.languageId);
-                return `\`\`\`${langId}\n${content}\n\`\`\``;
+                return `${this.options.extraSpacing ? '\n' : ''}\`\`\`${langId}\n${content}\n\`\`\`${this.options.extraSpacing ? '\n' : ''}`;
             }
             return content;
         }
@@ -296,9 +296,17 @@ export class PlainTextFormatter extends BaseFormatter {
             const start = index * this.options.chunkSize + 1;
             const end = Math.min(start + chunk.split('\n').length - 1, metadata.content.split('\n').length);
             
+            if (index > 0 && this.options.extraSpacing) {
+                lines.push('');
+            }
+            
             lines.push(`//${chunkSeparator}`,
                 `// Chunk ${index + 1}: Lines ${start}-${end}`,
-                `//${chunkSeparator}\n`);
+                `//${chunkSeparator}`);
+            
+            if (this.options.extraSpacing) {
+                lines.push('');
+            }
             
             if (this.options.useCodeFences) {
                 lines.push(`\`\`\`${langId}`);
@@ -308,7 +316,7 @@ export class PlainTextFormatter extends BaseFormatter {
                 lines.push('```');
             }
             if (index < chunks.length - 1) {
-                lines.push('\n');
+                lines.push(this.options.extraSpacing ? '\n\n' : '\n');
             }
         });
 
@@ -413,7 +421,12 @@ export class MarkdownFormatter extends BaseFormatter {
                 lines.push(`| Exports | ${metadata.analysis.exports.join(', ')} |`);
             }
         }
-        lines.push('\n</details>\n');
+        lines.push('\n</details>');
+
+        // Add extra spacing after metadata section if enabled
+        if (this.options.extraSpacing) {
+            lines.push('');
+        }
 
         // Add AI summary and key points if available
         if (metadata.analysis?.aiSummary || metadata.analysis?.keyPoints?.length) {
@@ -427,19 +440,16 @@ export class MarkdownFormatter extends BaseFormatter {
                     lines.push(`- ${point}`);
                 });
             }
-            lines.push('\n</details>\n');
+            lines.push('\n</details>');
+
+            // Add extra spacing after AI analysis if enabled
+            if (this.options.extraSpacing) {
+                lines.push('');
+            }
         }
 
         // Add code block header with proper language identifier
-        const languageMap: { [key: string]: string } = {
-            'typescriptreact': 'tsx',
-            'javascriptreact': 'jsx',
-            'typescript': 'ts',
-            'javascript': 'js',
-            'markdown': 'md',
-            'plaintext': 'text'
-        };
-        const langId = languageMap[metadata.languageId] || metadata.languageId;
+        const langId = this.getLanguageIdentifier(metadata.languageId);
         lines.push(`\`\`\`${langId}`);
         
         return lines.join('\n');
@@ -465,21 +475,30 @@ export class MarkdownFormatter extends BaseFormatter {
             const start = index * this.options.chunkSize + 1;
             const end = Math.min(start + chunk.split('\n').length - 1, metadata.content.split('\n').length);
             
-            lines.push(`<details${index === 0 ? ' open' : ''}><summary>Chunk ${index + 1}: Lines ${start}-${end}</summary>\n`);
+            if (index > 0 && this.options.extraSpacing) {
+                lines.push('');  // Add extra spacing between chunks
+            }
             
-            // Add proper language identifier for the code block
-            const languageMap: { [key: string]: string } = {
-                'typescriptreact': 'tsx',
-                'javascriptreact': 'jsx',
-                'typescript': 'ts',
-                'javascript': 'js',
-                'markdown': 'md',
-                'plaintext': 'text'
-            };
-            const langId = languageMap[metadata.languageId] || metadata.languageId;
+            lines.push(`<details${index === 0 ? ' open' : ''}><summary>Chunk ${index + 1}: Lines ${start}-${end}</summary>`);
+            
+            if (this.options.extraSpacing) {
+                lines.push('');  // Add extra spacing before code block
+            }
+            
+            const langId = this.getLanguageIdentifier(metadata.languageId);
             lines.push(`\`\`\`${langId}`);
             lines.push(chunk);
-            lines.push('```\n</details>\n');
+            lines.push('```');
+            
+            if (this.options.extraSpacing) {
+                lines.push('');  // Add extra spacing before closing details
+            }
+            
+            lines.push('</details>');
+            
+            if (index < chunks.length - 1) {
+                lines.push(this.options.extraSpacing ? '\n' : '');  // Add extra spacing between chunks
+            }
         });
 
         return lines.join('\n');
@@ -573,7 +592,7 @@ export class HtmlFormatter extends BaseFormatter {
         const langInfo = this.getLanguageSpecificInfo(metadata);
         
         const lines = [
-            `<div class="file-section">`,
+            `<div class="file-section${this.options.extraSpacing ? ' extra-spacing' : ''}">`,
             `<h2 class="file-title">${relativePath}${metadata.chunkInfo || ''}</h2>`,
             '<div class="file-metadata">',
             '<table>',
@@ -601,6 +620,7 @@ export class HtmlFormatter extends BaseFormatter {
             }
         }
         lines.push('</table>');
+        lines.push('</div>'); // Close file-metadata
 
         // Add AI Analysis in a collapsible section
         if (metadata.analysis?.aiSummary || metadata.analysis?.keyPoints?.length) {
@@ -627,24 +647,26 @@ export class HtmlFormatter extends BaseFormatter {
             lines.push('</details>');
         }
 
-        lines.push('</div>'); // Close file-metadata
-
-        // Add CSS styles
+        // Add CSS styles with extra spacing options
         lines.push('<style>');
         lines.push('.file-section { margin: 2em 0; }');
+        lines.push('.file-section.extra-spacing { margin: 3em 0; }');
         lines.push('.file-title { color: #333; border-bottom: 2px solid #eee; padding-bottom: 0.5em; }');
         lines.push('.file-metadata { margin: 1em 0; }');
-        lines.push('.file-metadata table { border-collapse: collapse; width: 100%; }');
+        lines.push('.file-metadata table { border-collapse: collapse; width: 100%; margin-bottom: 1em; }');
         lines.push('.file-metadata th, .file-metadata td { padding: 0.5em; text-align: left; border: 1px solid #ddd; }');
         lines.push('.file-metadata th { background: #f5f5f5; }');
         lines.push('.ai-analysis { margin: 1em 0; }');
+        lines.push('.extra-spacing .ai-analysis { margin: 2em 0; }');
         lines.push('.ai-analysis summary { cursor: pointer; padding: 0.5em; background: #f5f5f5; }');
         lines.push('.analysis-content { padding: 1em; border: 1px solid #ddd; border-top: none; }');
         lines.push('.ai-summary { margin-bottom: 1em; }');
         lines.push('.key-points ul { margin: 0.5em 0; padding-left: 2em; }');
+        lines.push('.code-block { margin: 1em 0; }');
+        lines.push('.extra-spacing .code-block { margin: 2em 0; }');
         lines.push('</style>');
 
-        return lines.join('\n') + '\n';
+        return lines.join('\n');
     }
 
     protected generateFileFooter(_metadata: FileMetadata): string {
@@ -653,7 +675,8 @@ export class HtmlFormatter extends BaseFormatter {
 
     protected wrapContent(content: string, metadata: FileMetadata): string {
         const languageClass = metadata.languageId ? ` class="language-${metadata.languageId}"` : '';
-        return `<div class="code-block"><pre><code${languageClass}>${this.escapeHtml(content)}</code></pre></div>`;
+        const extraSpacingClass = this.options.extraSpacing ? ' extra-spacing' : '';
+        return `<div class="code-block${extraSpacingClass}"><pre><code${languageClass}>${this.escapeHtml(content)}</code></pre></div>`;
     }
 
     private escapeHtml(text: string): string {
