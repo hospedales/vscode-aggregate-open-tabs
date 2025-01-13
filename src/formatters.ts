@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { FileMetadata } from './utils';
-import { analyzeFile } from './analyzer';
 
 export interface FormatOptions {
     extraSpacing: boolean;
@@ -130,11 +129,11 @@ export class PlainTextFormatter extends BaseFormatter {
         ].filter(Boolean).join('\n');
     }
 
-    protected generateFileFooter(metadata: FileMetadata): string {
+    protected generateFileFooter(_metadata: FileMetadata): string {
         return '\n//=============================================================================\n';
     }
 
-    protected wrapContent(content: string, metadata: FileMetadata): string {
+    protected wrapContent(content: string, _metadata: FileMetadata): string {
         return content;
     }
 }
@@ -176,7 +175,7 @@ export class MarkdownFormatter extends BaseFormatter {
         ].filter(Boolean).join('\n');
     }
 
-    protected generateFileFooter(metadata: FileMetadata): string {
+    protected generateFileFooter(_metadata: FileMetadata): string {
         return '\n---\n';
     }
 
@@ -226,7 +225,7 @@ export class HtmlFormatter extends BaseFormatter {
         ].filter(Boolean).join('\n');
     }
 
-    protected generateFileFooter(metadata: FileMetadata): string {
+    protected generateFileFooter(_metadata: FileMetadata): string {
         return '\n<hr>\n';
     }
 

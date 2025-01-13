@@ -42,7 +42,6 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
         // Get configuration
         const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
         const chunkSize = config.get<number>('chunkSize', 2000);
-        const excludePatterns = config.get<string[]>('excludePatterns', []);
         const sensitiveDataHandling = config.get<string>('sensitiveDataHandling', 'warn');
         const outputFormat = config.get<string>('outputFormat', 'plaintext');
         const extraSpacing = config.get<boolean>('extraSpacing', true);

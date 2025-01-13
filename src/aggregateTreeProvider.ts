@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 
 export class AggregateTreeItem extends vscode.TreeItem {
     constructor(

@@ -147,7 +147,7 @@ export async function analyzeFile(document: vscode.TextDocument): Promise<FileAn
     const packageJsonPath = await findPackageJson(fileName);
     
     const frameworks: string[] = [];
-    const dependencies: string[] = [];
+    const dependencySet = new Set<string>();
     
     // Detect frameworks from code patterns
     for (const signature of FRAMEWORK_SIGNATURES) {
@@ -159,8 +159,27 @@ export async function analyzeFile(document: vscode.TextDocument): Promise<FileAn
         if (hasFramework) {
             frameworks.push(signature.name);
             if (signature.dependencies) {
-                dependencies.push(...signature.dependencies);
+                signature.dependencies.forEach(dep => dependencySet.add(dep));
             }
+        }
+    }
+
+    // If we found a package.json, check for actual dependencies
+    if (packageJsonPath) {
+        try {
+            const packageJson = JSON.parse(await vscode.workspace.fs.readFile(vscode.Uri.file(packageJsonPath)).then(buffer => buffer.toString()));
+            const allDeps = { 
+                ...packageJson.dependencies || {}, 
+                ...packageJson.devDependencies || {} 
+            };
+            // Only keep dependencies that are actually installed
+            for (const dep of dependencySet) {
+                if (!allDeps[dep]) {
+                    dependencySet.delete(dep);
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to read package.json:', error);
         }
     }
 
@@ -183,7 +202,7 @@ export async function analyzeFile(document: vscode.TextDocument): Promise<FileAn
     return {
         frameworks,
         purpose,
-        dependencies,
+        dependencies: Array.from(dependencySet),
         exports,
         imports
     };

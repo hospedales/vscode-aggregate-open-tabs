@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { minimatch } from 'minimatch';
 
 export async function selectFilesToAggregate(documents: vscode.TextDocument[]): Promise<vscode.TextDocument[] | undefined> {
     // Create QuickPick items for each document

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { analyzeFile, generateFilePurposeSummary } from './analyzer';
+import { analyzeFile } from './analyzer';
 import { FileMetadata } from './utils';
 
 export class FileTreeItem extends vscode.TreeItem {
@@ -86,7 +86,7 @@ export class EnhancedTreeProvider implements
     }
 
     // Handle drag
-    public async handleDrag(source: readonly (FileTreeItem | PreviewTreeItem)[], dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
+    public async handleDrag(source: readonly (FileTreeItem | PreviewTreeItem)[], dataTransfer: vscode.DataTransfer, _token: vscode.CancellationToken): Promise<void> {
         if (source.length === 0 || !(source[0] instanceof FileTreeItem)) {
             return;
         }
@@ -96,7 +96,7 @@ export class EnhancedTreeProvider implements
     }
 
     // Handle drop
-    public async handleDrop(target: FileTreeItem | PreviewTreeItem | undefined, dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
+    public async handleDrop(target: FileTreeItem | PreviewTreeItem | undefined, dataTransfer: vscode.DataTransfer, _token: vscode.CancellationToken): Promise<void> {
         const transferItem = dataTransfer.get('application/vnd.code.tree.aggregateOpenTabsView');
         if (!transferItem || !target || !(target instanceof FileTreeItem)) {
             return;
