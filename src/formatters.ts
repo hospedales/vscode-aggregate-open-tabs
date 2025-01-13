@@ -7,6 +7,7 @@ export interface FormatOptions {
     chunkSize: number;
     chunkSeparatorStyle: 'double' | 'single' | 'minimal';
     codeFenceLanguageMap?: Record<string, string>;
+    useCodeFences?: boolean;
     tailoredSummaries?: boolean;
     includeKeyPoints?: boolean;
     includeImports?: boolean;
@@ -126,6 +127,34 @@ abstract class BaseFormatter {
 
         return [toc, ...sections].join('\n');
     }
+
+    protected getLanguageIdentifier(languageId: string): string {
+        if (this.options.codeFenceLanguageMap && languageId in this.options.codeFenceLanguageMap) {
+            return this.options.codeFenceLanguageMap[languageId];
+        }
+
+        // Default mappings if no custom map is provided
+        const defaultMap: Record<string, string> = {
+            'typescriptreact': 'tsx',
+            'javascriptreact': 'jsx',
+            'typescript': 'ts',
+            'javascript': 'js',
+            'markdown': 'md',
+            'mdx': 'mdx',
+            'css': 'css',
+            'scss': 'scss',
+            'less': 'less',
+            'html': 'html',
+            'json': 'json',
+            'yaml': 'yaml',
+            'python': 'python',
+            'rust': 'rust',
+            'go': 'go',
+            'plaintext': 'text'
+        };
+
+        return defaultMap[languageId] || languageId;
+    }
 }
 
 export class PlainTextFormatter extends BaseFormatter {
@@ -242,17 +271,26 @@ export class PlainTextFormatter extends BaseFormatter {
 
     protected wrapContent(content: string, metadata: FileMetadata): string {
         if (!this.options.chunkSize || this.options.chunkSize <= 0) {
+            if (this.options.useCodeFences) {
+                const langId = this.getLanguageIdentifier(metadata.languageId);
+                return `\`\`\`${langId}\n${content}\n\`\`\``;
+            }
             return content;
         }
 
         const chunks = this.chunkContent(content);
         if (chunks.length <= 1) {
+            if (this.options.useCodeFences) {
+                const langId = this.getLanguageIdentifier(metadata.languageId);
+                return `\`\`\`${langId}\n${content}\n\`\`\``;
+            }
             return content;
         }
 
         // If content is chunked, add chunk headers with improved spacing
         const lines: string[] = [];
         const chunkSeparator = this.getChunkSeparator(this.options.chunkSeparatorStyle);
+        const langId = this.options.useCodeFences ? this.getLanguageIdentifier(metadata.languageId) : null;
         
         chunks.forEach((chunk, index) => {
             const start = index * this.options.chunkSize + 1;
@@ -261,7 +299,14 @@ export class PlainTextFormatter extends BaseFormatter {
             lines.push(`//${chunkSeparator}`,
                 `// Chunk ${index + 1}: Lines ${start}-${end}`,
                 `//${chunkSeparator}\n`);
+            
+            if (this.options.useCodeFences) {
+                lines.push(`\`\`\`${langId}`);
+            }
             lines.push(chunk);
+            if (this.options.useCodeFences) {
+                lines.push('```');
+            }
             if (index < chunks.length - 1) {
                 lines.push('\n');
             }

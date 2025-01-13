@@ -231,6 +231,11 @@
           },
           "description": "Map of VS Code language IDs to code fence language identifiers for Markdown output."
         },
+        "aggregateOpenTabs.useCodeFences": {
+          "type": "boolean",
+          "default": true,
+          "description": "Wrap code blocks in language-specific code fences (e.g. ```typescript) for better syntax highlighting in Markdown-aware contexts."
+        },
         "aggregateOpenTabs.chunkSeparatorStyle": {
           "type": "string",
           "enum": ["double", "single", "minimal"],
