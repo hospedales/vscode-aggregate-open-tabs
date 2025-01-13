@@ -1,5 +1,7 @@
 {
   "name": "vscode-aggregate-open-tabs",
+  "author": "Michael Hospedales",
+  "homepage": "https://github.com/hospedales/vscode-aggregate-open-tabs",
   "displayName": "Aggregate Open Tabs",
   "description": "Collects code from all currently open tabs and combines it into one file",
   "version": "0.0.1",
@@ -8,9 +10,6 @@
   },
   "categories": [
     "Other"
-  ],
-  "activationEvents": [
-    "onView:aggregateOpenTabsView"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -41,6 +40,18 @@
         "command": "extension.refreshAggregateView",
         "title": "Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "extension.selectiveAggregate",
+        "title": "Selectively Aggregate Open Tabs"
+      },
+      {
+        "command": "extension.copyAggregatedContent",
+        "title": "Copy Aggregated Content to Clipboard"
+      },
+      {
+        "command": "extension.openInNewWindow",
+        "title": "Open Aggregated File in New Window"
       }
     ],
     "menus": {
@@ -49,6 +60,18 @@
           "command": "extension.refreshAggregateView",
           "when": "view == aggregateOpenTabsView",
           "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "extension.copyAggregatedContent",
+          "when": "viewItem == aggregatedFile",
+          "group": "inline"
+        },
+        {
+          "command": "extension.openInNewWindow",
+          "when": "viewItem == aggregatedFile",
+          "group": "inline"
         }
       ]
     },
@@ -84,6 +107,29 @@
             [".py", ".ipynb"],
             [".java", ".kt"]
           ]
+        },
+        "aggregateOpenTabs.chunkSize": {
+          "type": "number",
+          "default": 2000,
+          "description": "Maximum number of lines per chunk when splitting large files. Set to 0 to disable chunking."
+        },
+        "aggregateOpenTabs.excludePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": ["**/*.env", "**/*.lock", "**/node_modules/**"],
+          "description": "Glob patterns for files to exclude from aggregation."
+        },
+        "aggregateOpenTabs.addSummaries": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add short summaries for each file in the aggregated output."
+        },
+        "aggregateOpenTabs.openInNewWindow": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open aggregated file in a new VS Code window by default."
         }
       }
     }
@@ -103,7 +149,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/vscode-aggregate-open-tabs.git"
+    "url": "https://github.com/hospedales/vscode-aggregate-open-tabs.git"
   },
-  "publisher": "your-publisher-name"
+  "publisher": "hospedales"
 }
