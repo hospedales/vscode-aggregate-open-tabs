@@ -1,13 +1,26 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { AggregateTreeProvider } from './aggregateTreeProvider';
 
 interface FileTypeCount {
     [key: string]: number;
 }
 
 export function activate(context: vscode.ExtensionContext) {
-    let disposable = vscode.commands.registerCommand('extension.aggregateOpenTabs', async () => {
+    // Create and register the tree data provider
+    const treeDataProvider = new AggregateTreeProvider();
+    const treeView = vscode.window.createTreeView('aggregateOpenTabsView', {
+        treeDataProvider: treeDataProvider
+    });
+    
+    // Register the refresh command
+    let refreshCommand = vscode.commands.registerCommand('extension.refreshAggregateView', () => {
+        treeDataProvider.refresh();
+    });
+
+    // Register the main command
+    let aggregateCommand = vscode.commands.registerCommand('extension.aggregateOpenTabs', async () => {
         try {
             const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
             const fileSeparatorFormat = config.get<string>('fileSeparatorFormat');
@@ -100,6 +113,9 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }
             
+            // Refresh the tree view to show updated configuration
+            treeDataProvider.refresh();
+            
             vscode.window.showInformationMessage(
                 `Successfully aggregated content from ${validDocuments.length} files!`
             );
@@ -112,7 +128,10 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    context.subscriptions.push(disposable);
+    // Register all disposables
+    context.subscriptions.push(treeView);
+    context.subscriptions.push(refreshCommand);
+    context.subscriptions.push(aggregateCommand);
 }
 
 export function deactivate() {} 

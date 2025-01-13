@@ -10,16 +10,48 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:extension.aggregateOpenTabs"
+    "onView:aggregateOpenTabsView"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aggregate-open-tabs",
+          "title": "Aggregate Open Tabs",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "aggregate-open-tabs": [
+        {
+          "id": "aggregateOpenTabsView",
+          "name": "Aggregate Files",
+          "type": "tree"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "extension.aggregateOpenTabs",
         "title": "Aggregate Open Tabs into One File"
+      },
+      {
+        "command": "extension.refreshAggregateView",
+        "title": "Refresh",
+        "icon": "$(refresh)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "extension.refreshAggregateView",
+          "when": "view == aggregateOpenTabsView",
+          "group": "navigation"
+        }
+      ]
+    },
     "configuration": {
       "title": "Aggregate Open Tabs",
       "properties": {
