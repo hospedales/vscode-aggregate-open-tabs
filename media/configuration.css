@@ -1,0 +1,83 @@
+body {
+    padding: 20px;
+    color: var(--vscode-editor-foreground);
+    font-family: var(--vscode-font-family);
+    background-color: var(--vscode-editor-background);
+}
+
+.section {
+    margin-bottom: 24px;
+    padding: 16px;
+    border-radius: 6px;
+    background: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-widget-border);
+}
+
+.section h2 {
+    margin-top: 0;
+    color: var(--vscode-editor-foreground);
+}
+
+.setting-group {
+    margin-bottom: 16px;
+}
+
+label {
+    display: block;
+    margin-bottom: 8px;
+}
+
+input[type="number"],
+input[type="text"],
+select {
+    width: 100%;
+    padding: 8px;
+    margin-bottom: 8px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 4px;
+}
+
+input[type="checkbox"] {
+    margin-right: 8px;
+}
+
+button {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+button:hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+.pattern-list {
+    margin-bottom: 8px;
+}
+
+.pattern-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.pattern-item button {
+    margin-left: 8px;
+}
+
+.empty-message {
+    font-style: italic;
+    color: var(--vscode-descriptionForeground);
+    margin: 8px 0;
+}
+
+.pattern-actions {
+    display: flex;
+    align-items: center;
+    margin-top: 8px;
+} 

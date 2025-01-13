@@ -9,12 +9,14 @@ export class ConfigurationPanel {
     public static currentPanel: ConfigurationPanel | undefined;
     private readonly _panel: vscode.WebviewPanel;
     private _disposables: vscode.Disposable[] = [];
+    private readonly _extensionUri: vscode.Uri;
 
     private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
         this._panel = panel;
+        this._extensionUri = extensionUri;
 
         // Set the webview's initial html content
-        this._panel.webview.html = this._getWebviewContent();
+        this._panel.webview.html = this._getWebviewContent(this._panel.webview);
 
         // Listen for when the panel is disposed
         // This happens when the user closes the panel or when the panel is closed programmatically
@@ -61,7 +63,11 @@ export class ConfigurationPanel {
             column || vscode.ViewColumn.One,
             {
                 enableScripts: true,
-                retainContextWhenHidden: true
+                retainContextWhenHidden: true,
+                localResourceRoots: [
+                    vscode.Uri.joinPath(extensionUri, 'media'),
+                    vscode.Uri.joinPath(extensionUri, 'out')
+                ]
             }
         );
 
@@ -88,75 +94,27 @@ export class ConfigurationPanel {
         await this._panel.webview.postMessage({ command: 'updateSettings', settings });
     }
 
-    private _getWebviewContent() {
+    private _getWebviewContent(webview: vscode.Webview) {
+        // Get the local path to script and convert it to a uri we can use in the webview
+        const scriptUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'configuration.js')
+        );
+
+        const styleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'configuration.css')
+        );
+
+        // Use a nonce to only allow a specific script to be run
+        const nonce = getNonce();
+
         return `<!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
             <title>Configuration</title>
-            <style>
-                body {
-                    padding: 20px;
-                    color: var(--vscode-editor-foreground);
-                    font-family: var(--vscode-font-family);
-                    background-color: var(--vscode-editor-background);
-                }
-                .section {
-                    margin-bottom: 24px;
-                    padding: 16px;
-                    border-radius: 6px;
-                    background: var(--vscode-editor-background);
-                    border: 1px solid var(--vscode-widget-border);
-                }
-                .section h2 {
-                    margin-top: 0;
-                    color: var(--vscode-editor-foreground);
-                }
-                .setting-group {
-                    margin-bottom: 16px;
-                }
-                label {
-                    display: block;
-                    margin-bottom: 8px;
-                }
-                input[type="number"],
-                input[type="text"],
-                select {
-                    width: 100%;
-                    padding: 8px;
-                    margin-bottom: 8px;
-                    background: var(--vscode-input-background);
-                    color: var(--vscode-input-foreground);
-                    border: 1px solid var(--vscode-input-border);
-                    border-radius: 4px;
-                }
-                input[type="checkbox"] {
-                    margin-right: 8px;
-                }
-                button {
-                    background: var(--vscode-button-background);
-                    color: var(--vscode-button-foreground);
-                    border: none;
-                    padding: 8px 16px;
-                    border-radius: 4px;
-                    cursor: pointer;
-                }
-                button:hover {
-                    background: var(--vscode-button-hoverBackground);
-                }
-                .pattern-list {
-                    margin-bottom: 8px;
-                }
-                .pattern-item {
-                    display: flex;
-                    align-items: center;
-                    margin-bottom: 4px;
-                }
-                .pattern-item button {
-                    margin-left: 8px;
-                }
-            </style>
+            <link href="${styleUri}" rel="stylesheet">
         </head>
         <body>
             <div class="section">
@@ -172,8 +130,11 @@ export class ConfigurationPanel {
             <div class="section">
                 <h2>File Exclusions</h2>
                 <div class="setting-group">
-                    <div id="excludePatterns" class="pattern-list"></div>
-                    <button onclick="addExcludePattern()">Add Pattern</button>
+                    <div class="pattern-list" id="excludePatterns"></div>
+                    <div class="pattern-actions">
+                        <input type="text" id="newExcludePattern" placeholder="Enter glob pattern (e.g., **/*.log)" style="width: calc(100% - 100px); margin-right: 8px;">
+                        <button onclick="addExcludePattern()">Add</button>
+                    </div>
                 </div>
             </div>
 
@@ -246,100 +207,7 @@ export class ConfigurationPanel {
                 </div>
             </div>
 
-            <script>
-                const vscode = acquireVsCodeApi();
-                let settings = {};
-
-                // Handle messages from the extension
-                window.addEventListener('message', event => {
-                    const message = event.data;
-                    switch (message.command) {
-                        case 'updateSettings':
-                            settings = message.settings;
-                            updateUI();
-                            break;
-                    }
-                });
-
-                function updateUI() {
-                    // Update all input fields with current settings
-                    Object.entries(settings).forEach(([key, value]) => {
-                        const element = document.getElementById(key);
-                        if (element) {
-                            if (element.type === 'checkbox') {
-                                element.checked = value;
-                            } else {
-                                element.value = value;
-                            }
-                        }
-                    });
-
-                    // Update pattern lists
-                    updatePatternList('excludePatterns', settings.excludePatterns || []);
-                    updatePatternList('redactionPatterns', settings.customRedactionPatterns || []);
-                }
-
-                function updatePatternList(id, patterns) {
-                    const container = document.getElementById(id);
-                    container.innerHTML = '';
-                    patterns.forEach((pattern, index) => {
-                        const div = document.createElement('div');
-                        div.className = 'pattern-item';
-                        div.innerHTML = \`
-                            <input type="text" value="\${pattern}" 
-                                   onchange="updatePattern('\${id}', \${index}, this.value)">
-                            <button onclick="removePattern('\${id}', \${index})">Remove</button>
-                        \`;
-                        container.appendChild(div);
-                    });
-                }
-
-                function addExcludePattern() {
-                    const patterns = settings.excludePatterns || [];
-                    patterns.push('**/*.example');
-                    updateSetting('excludePatterns', patterns);
-                }
-
-                function addRedactionPattern() {
-                    const patterns = settings.customRedactionPatterns || [];
-                    patterns.push('pattern');
-                    updateSetting('customRedactionPatterns', patterns);
-                }
-
-                function updatePattern(listId, index, value) {
-                    const key = listId === 'redactionPatterns' ? 'customRedactionPatterns' : listId;
-                    const patterns = [...(settings[key] || [])];
-                    patterns[index] = value;
-                    updateSetting(key, patterns);
-                }
-
-                function removePattern(listId, index) {
-                    const key = listId === 'redactionPatterns' ? 'customRedactionPatterns' : listId;
-                    const patterns = [...(settings[key] || [])];
-                    patterns.splice(index, 1);
-                    updateSetting(key, patterns);
-                }
-
-                // Add change listeners to all inputs
-                document.querySelectorAll('input, select').forEach(input => {
-                    input.addEventListener('change', () => {
-                        const value = input.type === 'checkbox' ? input.checked : input.value;
-                        if (input.type === 'number') {
-                            updateSetting(input.id, parseInt(value, 10));
-                        } else {
-                            updateSetting(input.id, value);
-                        }
-                    });
-                });
-
-                function updateSetting(key, value) {
-                    settings[key] = value;
-                    vscode.postMessage({
-                        command: 'updateSetting',
-                        value: { key, value }
-                    });
-                }
-            </script>
+            <script nonce="${nonce}" src="${scriptUri}"></script>
         </body>
         </html>`;
     }
@@ -357,4 +225,13 @@ export class ConfigurationPanel {
             }
         }
     }
+}
+
+function getNonce() {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
 } 
