@@ -6,11 +6,19 @@ export interface FileMetadata {
     fileName: string;
     relativePath: string;
     languageId: string;
-    workspace: string | undefined;
     size: number;
-    lastModified: Date;
+    lastModified: string;
     content: string;
+    workspace?: string;
     summary?: string;
+    analysis?: {
+        frameworks: string[];
+        purpose: string;
+        dependencies: string[];
+        exports: string[];
+        imports: string[];
+    };
+    chunkInfo?: string;
 }
 
 export interface FileTypeCount {
@@ -29,7 +37,7 @@ export function getFileMetadata(document: vscode.TextDocument): FileMetadata {
         languageId: document.languageId,
         workspace: workspaceFolder?.name,
         size: stats.size,
-        lastModified: stats.mtime,
+        lastModified: stats.mtime.toISOString(),
         content: document.getText(),
         summary: generateFileSummary(document)
     };
@@ -67,7 +75,7 @@ export function generateFileHeader(file: FileMetadata): string {
     header += `// File: ${file.relativePath}${workspace}\n`;
     header += `// Language: ${file.languageId}\n`;
     header += `// Size: ${formatBytes(file.size)}\n`;
-    header += `// Last Modified: ${file.lastModified.toLocaleString()}\n`;
+    header += `// Last Modified: ${file.lastModified}\n`;
     if (file.summary) {
         header += `// Summary: ${file.summary}\n`;
     }

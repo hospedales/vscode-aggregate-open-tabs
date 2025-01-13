@@ -1,205 +1,185 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import * as fs from 'fs';
-import { AggregateTreeProvider } from './aggregateTreeProvider';
+import { FileMetadata, getFileMetadata } from './utils';
+import { createFormatter } from './formatters';
 import { selectFilesToAggregate } from './selectiveAggregation';
-import {
-    FileMetadata,
-    FileTypeCount,
-    getFileMetadata,
-    generateTableOfContents,
-    generateFileHeader,
-    generateFileFooter,
-    chunkContent,
-    openInNewWindow,
-    shouldExcludeFile
-} from './utils';
+import { detectSensitiveData, redactSensitiveData } from './security';
+import { StorageManager } from './storage';
+import { EnhancedTreeProvider } from './treeView';
+import { analyzeFile } from './analyzer';
 
-let lastAggregatedContent: string | undefined;
+let treeDataProvider: EnhancedTreeProvider;
+let storageManager: StorageManager;
 
-async function aggregateFiles(documents: vscode.TextDocument[]): Promise<string | undefined> {
-    try {
-        const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
-        const autoSave = config.get<boolean>('autoSave');
-        const autoSavePath = config.get<string>('autoSavePath');
-        const chunkSize = config.get<number>('chunkSize') || 0;
-        
-        // Get metadata for all valid documents
-        const filesMetadata = documents.map(doc => getFileMetadata(doc));
+export async function activate(context: vscode.ExtensionContext) {
+    // Initialize providers and managers
+    treeDataProvider = new EnhancedTreeProvider();
+    storageManager = new StorageManager(context);
 
-        // Generate table of contents
-        let aggregatedContent = generateTableOfContents(filesMetadata);
-
-        // Combine all contents with enhanced formatting
-        for (const fileMetadata of filesMetadata) {
-            aggregatedContent += generateFileHeader(fileMetadata);
-            
-            // Handle chunking if enabled
-            if (chunkSize > 0) {
-                const chunks = chunkContent(fileMetadata.content, chunkSize);
-                chunks.forEach((chunk, index) => {
-                    if (index > 0) {
-                        aggregatedContent += `\n// Chunk ${index + 1}/${chunks.length}\n`;
-                    }
-                    aggregatedContent += chunk;
-                });
-            } else {
-                aggregatedContent += fileMetadata.content;
-            }
-            
-            aggregatedContent += generateFileFooter(fileMetadata);
-        }
-
-        // Store for copy command
-        lastAggregatedContent = aggregatedContent;
-
-        // Detect most common language for syntax highlighting
-        const languageCounts: FileTypeCount = {};
-        filesMetadata.forEach(file => {
-            const lang = file.languageId;
-            languageCounts[lang] = (languageCounts[lang] || 0) + 1;
-        });
-
-        const mostCommonLanguage = Object.entries(languageCounts)
-            .reduce((a, b) => (a[1] > b[1] ? a : b))[0];
-
-        // Handle auto-save if enabled
-        if (autoSave) {
-            try {
-                let savePath = autoSavePath;
-                if (!savePath && vscode.workspace.workspaceFolders) {
-                    savePath = vscode.workspace.workspaceFolders[0].uri.fsPath;
-                }
-
-                if (savePath) {
-                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-                    const saveFilePath = path.join(savePath, `aggregated-${timestamp}.${mostCommonLanguage}`);
-                    
-                    fs.writeFileSync(saveFilePath, aggregatedContent);
-                    vscode.window.showInformationMessage(`Aggregated file saved to: ${saveFilePath}`);
-                } else {
-                    vscode.window.showWarningMessage('Auto-save enabled but no valid save path found.');
-                }
-            } catch (saveError) {
-                vscode.window.showErrorMessage(`Failed to auto-save: ${saveError instanceof Error ? saveError.message : 'Unknown error'}`);
-            }
-        }
-
-        return aggregatedContent;
-    } catch (error) {
-        if (error instanceof Error) {
-            vscode.window.showErrorMessage(`Error aggregating files: ${error.message}`);
-        } else {
-            vscode.window.showErrorMessage('An unknown error occurred while aggregating files.');
-        }
-        return undefined;
-    }
-}
-
-async function showAggregatedContent(content: string, language: string): Promise<void> {
-    const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
-    const openInNew = config.get<boolean>('openInNewWindow');
-
-    if (openInNew) {
-        await openInNewWindow(content, language);
-    } else {
-        const doc = await vscode.workspace.openTextDocument({
-            content: content,
-            language: language
-        });
-
-        await vscode.window.showTextDocument(doc, {
-            viewColumn: vscode.ViewColumn.Beside,
-            preview: false
-        });
-    }
-}
-
-export function activate(context: vscode.ExtensionContext) {
-    // Create and register the tree data provider
-    const treeDataProvider = new AggregateTreeProvider();
+    // Register tree view
     const treeView = vscode.window.createTreeView('aggregateOpenTabsView', {
-        treeDataProvider: treeDataProvider
-    });
-    
-    // Register the refresh command
-    let refreshCommand = vscode.commands.registerCommand('extension.refreshAggregateView', () => {
-        treeDataProvider.refresh();
+        treeDataProvider,
+        dragAndDropController: treeDataProvider
     });
 
-    // Register the selective aggregate command
-    let selectiveCommand = vscode.commands.registerCommand('extension.selectiveAggregate', async () => {
-        const selectedDocs = await selectFilesToAggregate();
-        if (selectedDocs && selectedDocs.length > 0) {
-            const content = await aggregateFiles(selectedDocs);
-            if (content) {
-                await showAggregatedContent(content, selectedDocs[0].languageId);
-                vscode.window.showInformationMessage(
-                    `Successfully aggregated content from ${selectedDocs.length} files!`
-                );
-            }
-        }
-    });
+    // Register commands
+    const commands = [
+        vscode.commands.registerCommand('extension.aggregateOpenTabs', () => aggregateFiles()),
+        vscode.commands.registerCommand('extension.selectiveAggregate', () => aggregateFiles(true)),
+        vscode.commands.registerCommand('extension.refreshAggregateView', () => treeDataProvider.refresh()),
+        vscode.commands.registerCommand('extension.copyAggregatedContent', copyAggregatedContent),
+        vscode.commands.registerCommand('extension.openInNewWindow', () => openInNewWindow()),
+        vscode.commands.registerCommand('extension.uploadToGist', () => storageManager.uploadToGist()),
+        vscode.commands.registerCommand('extension.saveSnapshot', () => storageManager.saveSnapshot()),
+        vscode.commands.registerCommand('extension.loadSnapshot', () => storageManager.loadSnapshot())
+    ];
 
-    // Register the copy content command
-    let copyCommand = vscode.commands.registerCommand('extension.copyAggregatedContent', async () => {
-        if (lastAggregatedContent) {
-            await vscode.env.clipboard.writeText(lastAggregatedContent);
-            vscode.window.showInformationMessage('Aggregated content copied to clipboard!');
-        } else {
-            vscode.window.showWarningMessage('No aggregated content available. Please aggregate files first.');
-        }
-    });
+    context.subscriptions.push(treeView, ...commands);
+}
 
-    // Register the open in new window command
-    let newWindowCommand = vscode.commands.registerCommand('extension.openInNewWindow', async () => {
-        if (lastAggregatedContent) {
-            const doc = await vscode.workspace.openTextDocument({
-                content: lastAggregatedContent,
-                language: 'typescript' // Default to TypeScript, but you could store the last used language
-            });
-            await openInNewWindow(lastAggregatedContent, doc.languageId);
-        } else {
-            vscode.window.showWarningMessage('No aggregated content available. Please aggregate files first.');
-        }
-    });
+async function aggregateFiles(selective: boolean = false): Promise<void> {
+    try {
+        // Get configuration
+        const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
+        const chunkSize = config.get<number>('chunkSize', 2000);
+        const excludePatterns = config.get<string[]>('excludePatterns', []);
+        const sensitiveDataHandling = config.get<string>('sensitiveDataHandling', 'warn');
+        const outputFormat = config.get<string>('outputFormat', 'plaintext');
+        const extraSpacing = config.get<boolean>('extraSpacing', true);
+        const enhancedSummaries = config.get<boolean>('enhancedSummaries', true);
 
-    // Register the main command
-    let aggregateCommand = vscode.commands.registerCommand('extension.aggregateOpenTabs', async () => {
-        // Get all open text documents
-        const openDocuments = vscode.workspace.textDocuments.filter(doc => 
+        // Get open documents
+        let documents = vscode.workspace.textDocuments.filter(doc => 
             !doc.isUntitled && 
             !doc.uri.scheme.startsWith('output') &&
             !doc.uri.scheme.startsWith('debug') &&
-            doc.uri.scheme === 'file' &&
-            !shouldExcludeFile(doc)
+            doc.uri.scheme === 'file'
         );
-        
-        if (openDocuments.length === 0) {
-            vscode.window.showInformationMessage('No matching documents found.');
+
+        // Apply selective aggregation if requested
+        if (selective) {
+            const selectedDocs = await selectFilesToAggregate(documents);
+            if (!selectedDocs) {
+                return;
+            }
+            documents = selectedDocs;
+        }
+
+        // Process each document
+        const fileMetadata = (await Promise.all(
+            documents.map(async doc => {
+                try {
+                    const metadata = await getFileMetadata(doc);
+                    
+                    // Check for sensitive data
+                    if (sensitiveDataHandling !== 'ignore') {
+                        const content = doc.getText();
+                        const sensitiveMatches = await detectSensitiveData(content);
+                        if (sensitiveMatches.length > 0) {
+                            switch (sensitiveDataHandling) {
+                                case 'warn':
+                                    const message = `Sensitive data detected in ${path.basename(doc.fileName)}. Proceed?`;
+                                    const proceed = await vscode.window.showWarningMessage(
+                                        message,
+                                        { modal: true },
+                                        'Yes',
+                                        'No'
+                                    );
+                                    if (proceed !== 'Yes') {
+                                        return null;
+                                    }
+                                    break;
+                                case 'redact':
+                                    metadata.content = await redactSensitiveData(content, sensitiveMatches);
+                                    break;
+                                case 'skip':
+                                    return null;
+                            }
+                        }
+                    }
+
+                    // Analyze file for enhanced summaries
+                    if (enhancedSummaries) {
+                        metadata.analysis = await analyzeFile(doc);
+                    }
+
+                    return metadata;
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Error processing ${doc.fileName}: ${error instanceof Error ? error.message : String(error)}`);
+                    return null;
+                }
+            })
+        )).filter((file): file is FileMetadata => file !== null);
+
+        if (fileMetadata.length === 0) {
+            vscode.window.showInformationMessage('No files to aggregate.');
             return;
         }
 
-        const content = await aggregateFiles(openDocuments);
-        if (content) {
-            await showAggregatedContent(content, openDocuments[0].languageId);
-            treeDataProvider.refresh();
-            
-            vscode.window.showInformationMessage(
-                `Successfully aggregated content from ${openDocuments.length} files!`
-            );
+        // Create formatter and generate content
+        const formatter = createFormatter(outputFormat, { extraSpacing, enhancedSummaries, chunkSize });
+        const content = await formatter.format(fileMetadata);
+
+        // Show aggregated content
+        await showAggregatedContent(content, outputFormat);
+
+        // Refresh tree view
+        treeDataProvider.refresh();
+
+        // Auto-save if configured
+        if (config.get<boolean>('autoSave', false)) {
+            const autoSavePath = config.get<string>('autoSavePath', '');
+            await saveAggregatedContent(content, autoSavePath);
         }
+
+    } catch (error) {
+        vscode.window.showErrorMessage(`Error aggregating files: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+
+async function showAggregatedContent(content: string, format: string): Promise<void> {
+    const document = await vscode.workspace.openTextDocument({
+        content,
+        language: format === 'markdown' ? 'markdown' : format === 'html' ? 'html' : 'plaintext'
     });
 
-    // Register all disposables
-    context.subscriptions.push(
-        treeView,
-        refreshCommand,
-        selectiveCommand,
-        copyCommand,
-        newWindowCommand,
-        aggregateCommand
-    );
+    if (vscode.workspace.getConfiguration('aggregateOpenTabs').get<boolean>('openInNewWindow', false)) {
+        await openInNewWindow(document);
+    } else {
+        await vscode.window.showTextDocument(document, { preview: false });
+    }
+}
+
+async function copyAggregatedContent(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (editor) {
+        await vscode.env.clipboard.writeText(editor.document.getText());
+        vscode.window.showInformationMessage('Content copied to clipboard!');
+    }
+}
+
+async function openInNewWindow(document?: vscode.TextDocument): Promise<void> {
+    if (!document) {
+        document = vscode.window.activeTextEditor?.document;
+    }
+    if (document) {
+        await storageManager.openInNewWindow(document.getText());
+    }
+}
+
+async function saveAggregatedContent(content: string, autoSavePath: string): Promise<void> {
+    try {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const fileName = `aggregated-${timestamp}.txt`;
+        const filePath = path.join(autoSavePath || vscode.workspace.rootPath || '', fileName);
+        
+        const uri = vscode.Uri.file(filePath);
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(content));
+        
+        vscode.window.showInformationMessage(`Saved to: ${filePath}`);
+    } catch (error) {
+        vscode.window.showErrorMessage(`Error saving file: ${error instanceof Error ? error.message : String(error)}`);
+    }
 }
 
 export function deactivate() {} 

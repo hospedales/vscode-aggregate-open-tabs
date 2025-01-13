@@ -1,8 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import * as fs from 'fs';
 import fetch from 'node-fetch';
-import { FileMetadata } from './utils';
 
 interface Snapshot {
     id: string;
@@ -18,85 +16,87 @@ interface GistResponse {
 }
 
 export class StorageManager {
-    private context: vscode.ExtensionContext;
-    private snapshotsKey = 'aggregateOpenTabs.snapshots';
+    private readonly snapshotsKey = 'aggregateOpenTabs.snapshots';
+    private readonly maxSnapshots: number;
 
-    constructor(context: vscode.ExtensionContext) {
-        this.context = context;
-    }
-
-    private getSnapshots(): Snapshot[] {
-        return this.context.globalState.get<Snapshot[]>(this.snapshotsKey, []);
-    }
-
-    private async saveSnapshots(snapshots: Snapshot[]): Promise<void> {
+    constructor(private context: vscode.ExtensionContext) {
         const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
-        const maxSnapshots = config.get<number>('maxSnapshots') || 10;
+        this.maxSnapshots = config.get<number>('maxSnapshots', 10);
+    }
 
-        // Keep only the most recent snapshots
-        if (snapshots.length > maxSnapshots) {
-            snapshots = snapshots.slice(-maxSnapshots);
+    async saveSnapshot(): Promise<void> {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showWarningMessage('No active editor to save snapshot from.');
+            return;
         }
 
-        await this.context.globalState.update(this.snapshotsKey, snapshots);
-    }
-
-    async saveSnapshot(content: string, files: string[], language: string): Promise<void> {
-        const snapshots = this.getSnapshots();
-        const newSnapshot: Snapshot = {
+        const content = editor.document.getText();
+        const snapshot: Snapshot = {
             id: Date.now().toString(),
             timestamp: new Date().toISOString(),
             content,
-            files,
-            language
+            files: vscode.workspace.textDocuments
+                .filter(doc => !doc.isUntitled && doc.uri.scheme === 'file')
+                .map(doc => doc.fileName),
+            language: editor.document.languageId
         };
 
-        snapshots.push(newSnapshot);
-        await this.saveSnapshots(snapshots);
-    }
+        const snapshots: Snapshot[] = this.context.globalState.get<Snapshot[]>(this.snapshotsKey, []);
+        snapshots.unshift(snapshot);
 
-    async loadSnapshot(): Promise<Snapshot | undefined> {
-        const snapshots = this.getSnapshots();
-        if (snapshots.length === 0) {
-            vscode.window.showInformationMessage('No snapshots available.');
-            return undefined;
+        // Keep only the most recent snapshots
+        if (snapshots.length > this.maxSnapshots) {
+            snapshots.length = this.maxSnapshots;
         }
 
-        const items = snapshots.map(s => ({
-            label: new Date(s.timestamp).toLocaleString(),
-            description: `${s.files.length} files`,
-            detail: s.files.join(', '),
-            snapshot: s
+        await this.context.globalState.update(this.snapshotsKey, snapshots);
+        vscode.window.showInformationMessage('Snapshot saved successfully!');
+    }
+
+    async loadSnapshot(): Promise<void> {
+        const snapshots = this.context.globalState.get<Snapshot[]>(this.snapshotsKey, []);
+        if (snapshots.length === 0) {
+            vscode.window.showInformationMessage('No snapshots available.');
+            return;
+        }
+
+        const items = snapshots.map(snapshot => ({
+            label: new Date(snapshot.timestamp).toLocaleString(),
+            description: `${snapshot.files.length} files`,
+            snapshot
         }));
 
         const selected = await vscode.window.showQuickPick(items, {
             placeHolder: 'Select a snapshot to load'
         });
 
-        return selected?.snapshot;
+        if (selected) {
+            const document = await vscode.workspace.openTextDocument({
+                content: selected.snapshot.content,
+                language: selected.snapshot.language
+            });
+            await vscode.window.showTextDocument(document);
+        }
     }
 
-    async uploadToGist(content: string, description: string): Promise<string | undefined> {
-        const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
-        const token = config.get<string>('githubGistToken');
+    async uploadToGist(): Promise<void> {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showWarningMessage('No active editor to upload from.');
+            return;
+        }
 
+        const token = vscode.workspace.getConfiguration('aggregateOpenTabs').get<string>('githubGistToken');
         if (!token) {
-            const setToken = 'Set Token';
-            const response = await vscode.window.showErrorMessage(
-                'GitHub token not found. Please set your GitHub token in settings.',
-                setToken
-            );
-
-            if (response === setToken) {
-                await vscode.commands.executeCommand(
-                    'workbench.action.openSettings',
-                    'aggregateOpenTabs.githubGistToken'
-                );
-            }
-            return undefined;
+            vscode.window.showErrorMessage('GitHub token not configured. Please set aggregateOpenTabs.githubGistToken in settings.');
+            return;
         }
 
         try {
+            const content = editor.document.getText();
+            const fileName = path.basename(editor.document.fileName);
+            
             const response = await fetch('https://api.github.com/gists', {
                 method: 'POST',
                 headers: {
@@ -104,25 +104,44 @@ export class StorageManager {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    description: description,
+                    description: 'Aggregated files from VS Code',
                     public: false,
                     files: {
-                        'aggregated-code.md': {
-                            content: content
+                        [fileName]: {
+                            content
                         }
                     }
                 })
             });
 
             if (!response.ok) {
-                throw new Error(`GitHub API error: ${response.statusText}`);
+                throw new Error(`GitHub API responded with ${response.status}: ${response.statusText}`);
             }
 
             const data = await response.json() as GistResponse;
-            return data.html_url;
+            vscode.window.showInformationMessage(`Gist created successfully! ${data.html_url}`);
+            
+            // Open in browser
+            vscode.env.openExternal(vscode.Uri.parse(data.html_url));
         } catch (error) {
-            vscode.window.showErrorMessage(`Failed to create Gist: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            return undefined;
+            vscode.window.showErrorMessage(`Failed to create Gist: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    async openInNewWindow(content: string): Promise<void> {
+        try {
+            const tmpFilePath = path.join(this.context.globalStorageUri.fsPath, 'temp.txt');
+            
+            // Create a temporary file
+            await vscode.workspace.fs.writeFile(
+                vscode.Uri.file(tmpFilePath),
+                Buffer.from(content)
+            );
+
+            // Open new window with the file
+            await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(path.dirname(tmpFilePath)));
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to open in new window: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 } 

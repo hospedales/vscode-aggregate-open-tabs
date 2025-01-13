@@ -1,185 +1,246 @@
+import * as vscode from 'vscode';
+import * as path from 'path';
 import { FileMetadata } from './utils';
+import { analyzeFile } from './analyzer';
 
 export interface FormatOptions {
     extraSpacing: boolean;
     enhancedSummaries: boolean;
+    chunkSize: number;
 }
 
 abstract class BaseFormatter {
-    protected options: FormatOptions;
+    constructor(protected options: FormatOptions) {}
 
-    constructor(options: FormatOptions) {
-        this.options = options;
+    protected abstract generateTableOfContents(files: FileMetadata[]): string;
+    protected abstract generateFileHeader(metadata: FileMetadata): string;
+    protected abstract generateFileFooter(metadata: FileMetadata): string;
+    protected abstract wrapContent(content: string, metadata: FileMetadata): string;
+
+    protected getRelativePath(filePath: string): string {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        return workspaceRoot ? path.relative(workspaceRoot, filePath) : filePath;
     }
 
-    protected getExtraNewlines(): string {
-        return this.options.extraSpacing ? '\n' : '';
+    protected getLanguageSpecificInfo(metadata: FileMetadata): string {
+        const info: string[] = [];
+        
+        if (metadata.languageId === 'typescriptreact' || metadata.languageId === 'typescript') {
+            const hasUseClient = metadata.content.includes('use client');
+            info.push(hasUseClient ? 'Client Component' : 'Server Component');
+        }
+
+        if (metadata.analysis?.frameworks && metadata.analysis.frameworks.length > 0) {
+            info.push(`Frameworks: ${metadata.analysis.frameworks.join(', ')}`);
+        }
+
+        return info.join(' | ');
     }
 
-    abstract generateTableOfContents(files: FileMetadata[]): string;
-    abstract generateFileHeader(file: FileMetadata): string;
-    abstract generateFileFooter(file: FileMetadata): string;
-    abstract wrapContent(content: string): string;
+    protected chunkContent(content: string): string[] {
+        if (!this.options.chunkSize || this.options.chunkSize <= 0) {
+            return [content];
+        }
+
+        const lines = content.split('\n');
+        const chunks: string[] = [];
+        let currentChunk: string[] = [];
+        let currentSize = 0;
+
+        for (const line of lines) {
+            if (currentSize + line.length > this.options.chunkSize && currentChunk.length > 0) {
+                chunks.push(currentChunk.join('\n'));
+                currentChunk = [];
+                currentSize = 0;
+            }
+            currentChunk.push(line);
+            currentSize += line.length;
+        }
+
+        if (currentChunk.length > 0) {
+            chunks.push(currentChunk.join('\n'));
+        }
+
+        return chunks;
+    }
+
+    async format(files: FileMetadata[]): Promise<string> {
+        const toc = this.generateTableOfContents(files);
+        const sections: string[] = [];
+
+        for (const file of files) {
+            const chunks = this.chunkContent(file.content);
+            for (let i = 0; i < chunks.length; i++) {
+                const isChunked = chunks.length > 1;
+                const chunkMeta = { 
+                    ...file,
+                    content: chunks[i],
+                    chunkInfo: isChunked ? ` (Chunk ${i + 1}/${chunks.length})` : ''
+                };
+
+                const section = [
+                    this.options.extraSpacing ? '\n' : '',
+                    this.generateFileHeader(chunkMeta),
+                    this.options.extraSpacing ? '\n' : '',
+                    this.wrapContent(chunks[i], chunkMeta),
+                    this.options.extraSpacing ? '\n' : '',
+                    this.generateFileFooter(chunkMeta),
+                    this.options.extraSpacing ? '\n' : ''
+                ].join('');
+
+                sections.push(section);
+            }
+        }
+
+        return [toc, ...sections].join('\n');
+    }
 }
 
 export class PlainTextFormatter extends BaseFormatter {
-    generateTableOfContents(files: FileMetadata[]): string {
-        let toc = '//=============================================================================\n';
-        toc += '// TABLE OF CONTENTS\n';
-        toc += '//=============================================================================\n\n';
+    protected generateTableOfContents(files: FileMetadata[]): string {
+        const lines = ['Table of Contents:', '=================='];
         
-        files.forEach((file, index) => {
-            const workspace = file.workspace ? ` (${file.workspace})` : '';
-            toc += `// ${index + 1}. ${file.relativePath}${workspace}\n`;
-            toc += `//    Language: ${file.languageId}, Size: ${file.size} bytes\n`;
-            if (file.summary) {
-                toc += `//    Summary: ${file.summary}\n`;
+        for (const file of files) {
+            const relativePath = this.getRelativePath(file.fileName);
+            const langInfo = this.getLanguageSpecificInfo(file);
+            lines.push(`${relativePath}${langInfo ? ` (${langInfo})` : ''}`);
+            
+            if (this.options.enhancedSummaries && file.analysis?.purpose) {
+                lines.push(`  Purpose: ${file.analysis.purpose}`);
+                if (file.analysis.exports.length > 0) {
+                    lines.push(`  Exports: ${file.analysis.exports.join(', ')}`);
+                }
             }
-            if (this.options.extraSpacing) toc += '\n';
-        });
-        
-        toc += '\n//=============================================================================\n\n';
-        return toc;
+        }
+
+        return lines.join('\n') + '\n';
     }
 
-    generateFileHeader(file: FileMetadata): string {
-        const workspace = file.workspace ? ` (${file.workspace})` : '';
-        let header = '//=============================================================================\n';
-        header += `// File: ${file.relativePath}${workspace}\n`;
-        header += `// Language: ${file.languageId}\n`;
-        header += `// Size: ${file.size} bytes\n`;
-        header += `// Last Modified: ${file.lastModified.toLocaleString()}\n`;
-        if (file.summary) {
-            header += `// Summary: ${file.summary}\n`;
-        }
-        header += '//=============================================================================\n\n';
+    protected generateFileHeader(metadata: FileMetadata): string {
+        const relativePath = this.getRelativePath(metadata.fileName);
+        const langInfo = this.getLanguageSpecificInfo(metadata);
         
-        if (file.languageId !== 'plaintext') {
-            header += '```' + file.languageId + '\n';
-        }
-        
-        return header;
+        return [
+            '//=============================================================================',
+            `// File: ${relativePath}${metadata.chunkInfo || ''}`,
+            `// Language: ${metadata.languageId}${langInfo ? ` | ${langInfo}` : ''}`,
+            `// Size: ${metadata.size} bytes | Last Modified: ${metadata.lastModified}`,
+            metadata.analysis?.purpose ? `// Purpose: ${metadata.analysis.purpose}` : '',
+            '//=============================================================================\n'
+        ].filter(Boolean).join('\n');
     }
 
-    generateFileFooter(file: FileMetadata): string {
-        let footer = '';
-        if (file.languageId !== 'plaintext') {
-            footer = '\n```\n';
-        }
-        footer += '\n//=============================================================================\n\n';
-        return footer;
+    protected generateFileFooter(metadata: FileMetadata): string {
+        return '\n//=============================================================================\n';
     }
 
-    wrapContent(content: string): string {
+    protected wrapContent(content: string, metadata: FileMetadata): string {
         return content;
     }
 }
 
 export class MarkdownFormatter extends BaseFormatter {
-    generateTableOfContents(files: FileMetadata[]): string {
-        let toc = '# Table of Contents\n\n';
+    protected generateTableOfContents(files: FileMetadata[]): string {
+        const lines = ['# Table of Contents\n'];
         
-        files.forEach((file, index) => {
-            const workspace = file.workspace ? ` (${file.workspace})` : '';
-            toc += `${index + 1}. [${file.relativePath}](#file-${index + 1})${workspace}\n`;
-            toc += `   - Language: \`${file.languageId}\`\n`;
-            toc += `   - Size: ${file.size} bytes\n`;
-            if (file.summary) {
-                toc += `   - Summary: ${file.summary}\n`;
+        for (const file of files) {
+            const relativePath = this.getRelativePath(file.fileName);
+            const langInfo = this.getLanguageSpecificInfo(file);
+            lines.push(`- \`${relativePath}\`${langInfo ? ` (${langInfo})` : ''}`);
+            
+            if (this.options.enhancedSummaries && file.analysis?.purpose) {
+                lines.push(`  - Purpose: ${file.analysis.purpose}`);
+                if (file.analysis.exports.length > 0) {
+                    lines.push(`  - Exports: ${file.analysis.exports.join(', ')}`);
+                }
             }
-            if (this.options.extraSpacing) toc += '\n';
-        });
-        
-        toc += '\n---\n\n';
-        return toc;
-    }
-
-    generateFileHeader(file: FileMetadata): string {
-        const workspace = file.workspace ? ` (${file.workspace})` : '';
-        let header = `## ${file.relativePath}${workspace}\n\n`;
-        header += `- **Language:** \`${file.languageId}\`\n`;
-        header += `- **Size:** ${file.size} bytes\n`;
-        header += `- **Last Modified:** ${file.lastModified.toLocaleString()}\n`;
-        if (file.summary) {
-            header += `- **Summary:** ${file.summary}\n`;
         }
-        header += '\n';
+
+        return lines.join('\n') + '\n';
+    }
+
+    protected generateFileHeader(metadata: FileMetadata): string {
+        const relativePath = this.getRelativePath(metadata.fileName);
+        const langInfo = this.getLanguageSpecificInfo(metadata);
         
-        header += '```' + file.languageId + '\n';
-        return header;
+        return [
+            `## ${relativePath}${metadata.chunkInfo || ''}`,
+            '',
+            '| Property | Value |',
+            '|----------|--------|',
+            `| Language | ${metadata.languageId}${langInfo ? ` (${langInfo})` : ''} |`,
+            `| Size | ${metadata.size} bytes |`,
+            `| Last Modified | ${metadata.lastModified} |`,
+            metadata.analysis?.purpose ? `| Purpose | ${metadata.analysis.purpose} |` : '',
+            '\n'
+        ].filter(Boolean).join('\n');
     }
 
-    generateFileFooter(file: FileMetadata): string {
-        return '\n```\n\n---\n\n';
+    protected generateFileFooter(metadata: FileMetadata): string {
+        return '\n---\n';
     }
 
-    wrapContent(content: string): string {
-        return content;
+    protected wrapContent(content: string, metadata: FileMetadata): string {
+        return `\`\`\`${metadata.languageId}\n${content}\n\`\`\``;
     }
 }
 
 export class HtmlFormatter extends BaseFormatter {
-    generateTableOfContents(files: FileMetadata[]): string {
-        let toc = '<h1>Table of Contents</h1>\n<ol>\n';
+    protected generateTableOfContents(files: FileMetadata[]): string {
+        const lines = ['<h1>Table of Contents</h1>', '<ul>'];
         
-        files.forEach((file) => {
-            const workspace = file.workspace ? ` (${file.workspace})` : '';
-            toc += `  <li>\n    <strong>${file.relativePath}</strong>${workspace}\n`;
-            toc += `    <ul>\n`;
-            toc += `      <li>Language: <code>${file.languageId}</code></li>\n`;
-            toc += `      <li>Size: ${file.size} bytes</li>\n`;
-            if (file.summary) {
-                toc += `      <li>Summary: ${file.summary}</li>\n`;
+        for (const file of files) {
+            const relativePath = this.getRelativePath(file.fileName);
+            const langInfo = this.getLanguageSpecificInfo(file);
+            lines.push(`<li><code>${relativePath}</code>${langInfo ? ` (${langInfo})` : ''}`);
+            
+            if (this.options.enhancedSummaries && file.analysis?.purpose) {
+                lines.push('<ul>');
+                lines.push(`<li>Purpose: ${file.analysis.purpose}</li>`);
+                if (file.analysis.exports.length > 0) {
+                    lines.push(`<li>Exports: ${file.analysis.exports.join(', ')}</li>`);
+                }
+                lines.push('</ul>');
             }
-            toc += `    </ul>\n  </li>\n`;
-            if (this.options.extraSpacing) toc += '\n';
-        });
-        
-        toc += '</ol>\n<hr>\n\n';
-        return toc;
-    }
-
-    generateFileHeader(file: FileMetadata): string {
-        const workspace = file.workspace ? ` (${file.workspace})` : '';
-        let header = `<h2>${file.relativePath}${workspace}</h2>\n`;
-        header += '<ul>\n';
-        header += `  <li><strong>Language:</strong> <code>${file.languageId}</code></li>\n`;
-        header += `  <li><strong>Size:</strong> ${file.size} bytes</li>\n`;
-        header += `  <li><strong>Last Modified:</strong> ${file.lastModified.toLocaleString()}</li>\n`;
-        if (file.summary) {
-            header += `  <li><strong>Summary:</strong> ${file.summary}</li>\n`;
+            
+            lines.push('</li>');
         }
-        header += '</ul>\n\n';
         
-        header += '<pre><code class="language-' + file.languageId + '">\n';
-        return header;
+        lines.push('</ul>');
+        return lines.join('\n') + '\n';
     }
 
-    generateFileFooter(file: FileMetadata): string {
-        return '\n</code></pre>\n\n<hr>\n\n';
+    protected generateFileHeader(metadata: FileMetadata): string {
+        const relativePath = this.getRelativePath(metadata.fileName);
+        const langInfo = this.getLanguageSpecificInfo(metadata);
+        
+        return [
+            `<h2>${relativePath}${metadata.chunkInfo || ''}</h2>`,
+            '<table>',
+            '<tr><th>Property</th><th>Value</th></tr>',
+            `<tr><td>Language</td><td>${metadata.languageId}${langInfo ? ` (${langInfo})` : ''}</td></tr>`,
+            `<tr><td>Size</td><td>${metadata.size} bytes</td></tr>`,
+            `<tr><td>Last Modified</td><td>${metadata.lastModified}</td></tr>`,
+            metadata.analysis?.purpose ? `<tr><td>Purpose</td><td>${metadata.analysis.purpose}</td></tr>` : '',
+            '</table>\n'
+        ].filter(Boolean).join('\n');
     }
 
-    wrapContent(content: string): string {
-        return `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aggregated Code</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/default.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
-    <script>hljs.highlightAll();</script>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; line-height: 1.6; padding: 2rem; max-width: 1200px; margin: 0 auto; }
-        pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; }
-        code { font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, Courier, monospace; }
-        hr { margin: 2rem 0; border: 0; border-top: 1px solid #eaecef; }
-    </style>
-</head>
-<body>
-${content}
-</body>
-</html>`;
+    protected generateFileFooter(metadata: FileMetadata): string {
+        return '\n<hr>\n';
+    }
+
+    protected wrapContent(content: string, metadata: FileMetadata): string {
+        return `<pre><code class="language-${metadata.languageId}">${this.escapeHtml(content)}</code></pre>`;
+    }
+
+    private escapeHtml(text: string): string {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 }
 

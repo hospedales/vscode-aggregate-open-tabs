@@ -67,15 +67,58 @@ export class PreviewTreeItem extends vscode.TreeItem {
     }
 }
 
-export class EnhancedTreeProvider implements vscode.TreeDataProvider<FileTreeItem | PreviewTreeItem> {
+export class EnhancedTreeProvider implements 
+    vscode.TreeDataProvider<FileTreeItem | PreviewTreeItem>,
+    vscode.TreeDragAndDropController<FileTreeItem | PreviewTreeItem> {
+    
     private _onDidChangeTreeData: vscode.EventEmitter<FileTreeItem | PreviewTreeItem | undefined | null | void> = new vscode.EventEmitter<FileTreeItem | PreviewTreeItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<FileTreeItem | PreviewTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
     private fileOrder: string[] = [];
 
+    // Implement drag and drop interface
+    readonly dragMimeTypes = ['application/vnd.code.tree.aggregateOpenTabsView'];
+    readonly dropMimeTypes = ['application/vnd.code.tree.aggregateOpenTabsView'];
+
     constructor() {
         // Set up drag and drop
         vscode.workspace.onDidChangeTextDocument(() => this.refresh());
+    }
+
+    // Handle drag
+    public async handleDrag(source: readonly (FileTreeItem | PreviewTreeItem)[], dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
+        if (source.length === 0 || !(source[0] instanceof FileTreeItem)) {
+            return;
+        }
+
+        const fileItem = source[0] as FileTreeItem;
+        dataTransfer.set('application/vnd.code.tree.aggregateOpenTabsView', new vscode.DataTransferItem(fileItem.document.fileName));
+    }
+
+    // Handle drop
+    public async handleDrop(target: FileTreeItem | PreviewTreeItem | undefined, dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
+        const transferItem = dataTransfer.get('application/vnd.code.tree.aggregateOpenTabsView');
+        if (!transferItem || !target || !(target instanceof FileTreeItem)) {
+            return;
+        }
+
+        const sourceFileName = transferItem.value;
+        const targetFileName = target.document.fileName;
+
+        const sourceIndex = this.fileOrder.indexOf(sourceFileName);
+        const targetIndex = this.fileOrder.indexOf(targetFileName);
+
+        if (sourceIndex === -1) {
+            // Source is new, insert it at target position
+            this.fileOrder.splice(targetIndex, 0, sourceFileName);
+        } else {
+            // Reorder existing items
+            this.fileOrder.splice(sourceIndex, 1);
+            const newTargetIndex = this.fileOrder.indexOf(targetFileName);
+            this.fileOrder.splice(newTargetIndex, 0, sourceFileName);
+        }
+
+        this.refresh();
     }
 
     refresh(): void {
@@ -128,23 +171,5 @@ export class EnhancedTreeProvider implements vscode.TreeDataProvider<FileTreeIte
         }));
 
         return items;
-    }
-
-    // Handle drag and drop reordering
-    handleDrop(source: FileTreeItem, target: FileTreeItem): void {
-        const sourceIndex = this.fileOrder.indexOf(source.document.fileName);
-        const targetIndex = this.fileOrder.indexOf(target.document.fileName);
-
-        if (sourceIndex === -1) {
-            // Source is new, insert it at target position
-            this.fileOrder.splice(targetIndex, 0, source.document.fileName);
-        } else {
-            // Reorder existing items
-            this.fileOrder.splice(sourceIndex, 1);
-            const newTargetIndex = this.fileOrder.indexOf(target.document.fileName);
-            this.fileOrder.splice(newTargetIndex, 0, source.document.fileName);
-        }
-
-        this.refresh();
     }
 } 

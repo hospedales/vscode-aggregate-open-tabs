@@ -1,58 +1,25 @@
 import * as vscode from 'vscode';
-import { FileMetadata, getFileMetadata, shouldExcludeFile } from './utils';
+import { minimatch } from 'minimatch';
 
-interface QuickPickFileItem extends vscode.QuickPickItem {
-    document: vscode.TextDocument;
-}
+export async function selectFilesToAggregate(documents: vscode.TextDocument[]): Promise<vscode.TextDocument[] | undefined> {
+    // Create QuickPick items for each document
+    const items = documents.map(doc => ({
+        label: doc.fileName,
+        description: doc.languageId,
+        picked: true,
+        document: doc
+    }));
 
-export async function selectFilesToAggregate(): Promise<vscode.TextDocument[] | undefined> {
-    const openDocuments = vscode.workspace.textDocuments.filter(doc => 
-        !doc.isUntitled && 
-        !doc.uri.scheme.startsWith('output') &&
-        !doc.uri.scheme.startsWith('debug') &&
-        doc.uri.scheme === 'file' &&
-        !shouldExcludeFile(doc)
-    );
+    // Show QuickPick with all items selected by default
+    const selected = await vscode.window.showQuickPick(items, {
+        canPickMany: true,
+        placeHolder: 'Select files to aggregate (all selected by default)',
+        title: 'Select Files to Aggregate'
+    });
 
-    if (openDocuments.length === 0) {
-        vscode.window.showInformationMessage('No valid documents found to aggregate.');
+    if (!selected) {
         return undefined;
     }
 
-    // Create QuickPick items for each document
-    const items: QuickPickFileItem[] = await Promise.all(
-        openDocuments.map(async (doc) => {
-            const metadata = getFileMetadata(doc);
-            return {
-                label: metadata.relativePath,
-                description: `${metadata.languageId} | ${metadata.workspace || 'External'}`,
-                detail: metadata.summary,
-                picked: true, // All items selected by default
-                document: doc
-            };
-        })
-    );
-
-    // Create and show QuickPick
-    const quickPick = vscode.window.createQuickPick<QuickPickFileItem>();
-    quickPick.items = items;
-    quickPick.selectedItems = items; // All items selected by default
-    quickPick.canSelectMany = true;
-    quickPick.title = 'Select Files to Aggregate';
-    quickPick.placeholder = 'All files are selected by default. Uncheck files to exclude them.';
-
-    return new Promise<vscode.TextDocument[] | undefined>((resolve) => {
-        quickPick.onDidAccept(() => {
-            const selectedDocs = quickPick.selectedItems.map(item => item.document);
-            quickPick.dispose();
-            resolve(selectedDocs);
-        });
-
-        quickPick.onDidHide(() => {
-            quickPick.dispose();
-            resolve(undefined);
-        });
-
-        quickPick.show();
-    });
+    return selected.map(item => item.document);
 } 
