@@ -143,21 +143,9 @@ export function isTextFile(fileName: string): boolean {
 export function shouldIgnoreFile(fileName: string): boolean {
     const ignorePatterns = [
         /node_modules/,
-        /\.git/,
-        /\.svn/,
-        /\.hg/,
-        /\.DS_Store/,
-        /Thumbs\.db/,
-        /\.env/,
-        /\.vscode/,
-        /\.idea/,
-        /\.vs/,
-        /dist/,
-        /build/,
-        /coverage/,
-        /\.next/,
-        /\.nuxt/,
-        /\.output/
+        /\.git\//,
+        /\.DS_Store$/,
+        /Thumbs\.db$/
     ];
     return ignorePatterns.some(pattern => pattern.test(fileName));
 } 

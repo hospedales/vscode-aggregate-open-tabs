@@ -20,7 +20,7 @@ class PreviewPanel {
     private readonly _extensionUri: vscode.Uri;
     private _updateTimeout: NodeJS.Timeout | undefined;
     private _lastProcessedFiles: Set<string> = new Set();
-    private _cachedMetadata: Map<string, FileMetadata> = new Map();
+    private _cachedMetadata: Map<string, any> = new Map();
     private _processingQueue: Promise<void> = Promise.resolve();
 
     constructor(extensionUri: vscode.Uri) {
@@ -45,17 +45,12 @@ class PreviewPanel {
         // This happens when the user closes the panel or when the panel is closed programmatically
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
-        // Update the content when the panel becomes visible
-        this._panel.onDidChangeViewState(
-            e => {
-                if (e.webviewPanel.visible) {
-                    // Debounce the update to prevent multiple rapid updates
-                    this.debouncedUpdate();
-                }
-            },
-            null,
-            this._disposables
-        );
+        // Force refresh when the panel becomes visible
+        this._panel.onDidChangeViewState(event => {
+            if (event.webviewPanel.visible) {
+                this.debouncedUpdate();
+            }
+        });
 
         // Handle messages from the webview
         this._panel.webview.onDidReceiveMessage(
@@ -78,19 +73,22 @@ class PreviewPanel {
         );
     }
 
-    private async debouncedUpdate() {
+    private async debouncedUpdate(forceRefresh: boolean = true) {
         if (this._updateTimeout) {
             clearTimeout(this._updateTimeout);
         }
         this._updateTimeout = setTimeout(() => {
             this._updateTimeout = undefined;
-            this._processingQueue = this._processingQueue.then(() => this.updateContent()).catch(error => {
-                vscode.window.showErrorMessage(`Error updating preview: ${error instanceof Error ? error.message : String(error)}`);
-            });
+            this._processingQueue = this._processingQueue
+                .then(() => this.updateContent(forceRefresh))
+                .catch((error: unknown) => {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    vscode.window.showErrorMessage(`Error updating preview: ${errorMessage}`);
+                });
         }, 500); // Increased debounce time for better performance
     }
 
-    public static createOrShow(extensionUri: vscode.Uri) {
+    public static createOrShow(extensionUri: vscode.Uri): void {
         if (previewPanel) {
             previewPanel._panel.reveal(vscode.ViewColumn.Beside);
         } else {
@@ -98,38 +96,45 @@ class PreviewPanel {
         }
     }
 
-    public async updateContent() {
+    public async updateContent(forceRefresh: boolean = false): Promise<void> {
         try {
             const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
-            let openFiles = vscode.workspace.textDocuments.filter(doc => 
-                !doc.isUntitled && 
-                !doc.uri.scheme.startsWith('output') &&
-                !doc.uri.scheme.startsWith('debug') &&
-                doc.uri.scheme === 'file' &&
-                !shouldIgnoreFile(doc.fileName)
-            );
+            let openFiles = vscode.window.visibleTextEditors
+                .map(editor => editor.document)
+                .filter(doc => 
+                    !doc.isUntitled && 
+                    doc.uri.scheme === 'file' &&
+                    !shouldIgnoreFile(doc.fileName)
+                );
 
             // Early exit if no files
             if (openFiles.length === 0) {
-                this._panel.webview.html = this._getWebviewContent('No files open to preview.');
+                this._panel.webview.html = this._getWebviewContent('No editor tabs found to aggregate. Please make sure you have files open in editor tabs.');
                 return;
             }
 
-            // Apply file type filtering if configured
-            const includeFileTypes = config.get<string[]>('includeFileTypes', []);
-            if (includeFileTypes.length > 0 && !includeFileTypes.includes('*')) {
-                openFiles = openFiles.filter(doc => 
-                    includeFileTypes.some(type => doc.fileName.toLowerCase().endsWith(type.toLowerCase()))
-                );
+            // Clear cache if force refresh
+            if (forceRefresh) {
+                this._lastProcessedFiles.clear();
+                this._cachedMetadata.clear();
             }
 
             // Check which files need processing
             const currentFiles = new Set(openFiles.map(doc => doc.fileName));
             const filesToProcess = openFiles.filter(doc => 
+                forceRefresh ||
                 !this._lastProcessedFiles.has(doc.fileName) || 
                 !this._cachedMetadata.has(doc.fileName) ||
-                doc.isDirty // Also process files that have been modified
+                doc.isDirty
             );
+
+            // Remove cached data for files that are no longer open
+            for (const fileName of this._lastProcessedFiles) {
+                if (!currentFiles.has(fileName)) {
+                    this._lastProcessedFiles.delete(fileName);
+                    this._cachedMetadata.delete(fileName);
+                }
+            }
 
             // Process only new or modified files
             if (filesToProcess.length > 0) {
@@ -169,13 +174,6 @@ class PreviewPanel {
                 this._lastProcessedFiles = currentFiles;
             }
 
-            // Remove cached metadata for files that are no longer open
-            for (const fileName of this._cachedMetadata.keys()) {
-                if (!currentFiles.has(fileName)) {
-                    this._cachedMetadata.delete(fileName);
-                }
-            }
-
             // Get all metadata (including cached)
             const fileMetadata = Array.from(currentFiles)
                 .map(fileName => this._cachedMetadata.get(fileName))
@@ -203,9 +201,10 @@ class PreviewPanel {
             const content = await formatter.format(fileMetadata);
             this._panel.webview.html = this._getWebviewContent(content);
 
-        } catch (error) {
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
             this._panel.webview.html = this._getWebviewContent(
-                `Error generating preview: ${error instanceof Error ? error.message : String(error)}`
+                `Error generating preview: ${errorMessage}`
             );
         }
     }
@@ -357,6 +356,8 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
     try {
         // Get configuration
         const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
+        
+        // Get all configuration options individually
         const chunkSize = config.get<number>('chunkSize', 2000);
         const sensitiveDataHandling = config.get<string>('sensitiveDataHandling', 'warn');
         const customRedactionPatterns = config.get<string[]>('customRedactionPatterns', []);
@@ -382,14 +383,25 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
         // Clear any previous selection state
         treeDataProvider.clearSelectedFiles();
 
-        // Get open documents
-        let openFiles = vscode.workspace.textDocuments
+        // Get all visible editor tabs
+        let openFiles = vscode.window.visibleTextEditors
+            .map(editor => editor.document)
             .filter(doc => 
                 !doc.isUntitled && 
-                !doc.uri.scheme.startsWith('debug') &&
                 doc.uri.scheme === 'file' &&
                 !shouldIgnoreFile(doc.fileName)
             );
+
+        // Log the number of files found for debugging
+        console.log(`Found ${openFiles.length} visible editor tabs`);
+        openFiles.forEach(doc => {
+            console.log(`  - ${doc.fileName} (${doc.languageId})`);
+        });
+
+        if (openFiles.length === 0) {
+            vscode.window.showInformationMessage('No editor tabs found to aggregate. Please make sure you have files open in editor tabs.');
+            return;
+        }
 
         // Apply selective aggregation if requested
         if (selective) {
@@ -402,10 +414,12 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
             treeDataProvider.setSelectedFiles(selectedDocs, true);
         }
 
-        // Process each document with enhanced analysis
+        // Process all documents in parallel
+        console.log('Processing files...');
         const fileMetadata = (await Promise.all(
             openFiles.map(async doc => {
                 try {
+                    console.log(`Processing ${doc.fileName}...`);
                     const metadata = getFileMetadata(doc.fileName, doc.getText(), doc.languageId);
                     
                     // Check for sensitive data
@@ -449,6 +463,7 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
                         metadata.analysis = analysis;
                     }
                     
+                    console.log(`Successfully processed ${doc.fileName}`);
                     return metadata;
                 } catch (error) {
                     console.error(`Error processing ${doc.fileName}:`, error);
@@ -457,8 +472,10 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
             })
         )).filter((file): file is FileMetadata => file !== null);
 
+        console.log(`Successfully processed ${fileMetadata.length} files`);
+
         if (fileMetadata.length === 0) {
-            vscode.window.showInformationMessage('No files to aggregate.');
+            vscode.window.showInformationMessage('No files to aggregate after processing.');
             return;
         }
 
@@ -470,11 +487,19 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
             chunkSeparatorStyle,
             codeFenceLanguageMap,
             tailoredSummaries,
-            includeKeyPoints
+            includeKeyPoints,
+            includeImports,
+            includeExports,
+            includeDependencies,
+            aiSummaryStyle
         });
-        const content = await formatter.format(fileMetadata);
 
-        // Show aggregated content
+        // Format all files at once
+        console.log('Formatting content...');
+        const content = await formatter.format(fileMetadata);
+        console.log('Content formatted successfully');
+
+        // Show the aggregated content
         await showAggregatedContent(content, outputFormat);
 
         // Refresh tree view
@@ -492,6 +517,7 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
         }
 
     } catch (error) {
+        console.error('Error in aggregateFiles:', error);
         vscode.window.showErrorMessage(`Error aggregating files: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
         // Always clear selection state after aggregation
@@ -500,17 +526,31 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
 }
 
 async function showAggregatedContent(content: string, format: string): Promise<void> {
-    const document = await vscode.workspace.openTextDocument({
-        content,
-        language: format === 'markdown' ? 'markdown' : format === 'html' ? 'html' : 'plaintext'
-    });
+    try {
+        // Create a unique title for the document
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const title = `Aggregated-${timestamp}`;
 
-    if (vscode.workspace.getConfiguration('aggregateOpenTabs').get<boolean>('openInNewWindow', false)) {
-        await openInNewWindow(document);
-    } else {
-        const editor = await vscode.window.showTextDocument(document, { 
-            preview: false,
-            viewColumn: vscode.ViewColumn.Beside 
+        // Create an untitled document with our custom title
+        const uri = vscode.Uri.parse(`untitled:${title}.${format === 'markdown' ? 'md' : format === 'html' ? 'html' : 'txt'}`);
+        const document = await vscode.workspace.openTextDocument(uri);
+        
+        // Set the content and language
+        const edit = new vscode.WorkspaceEdit();
+        edit.insert(uri, new vscode.Position(0, 0), content);
+        await vscode.workspace.applyEdit(edit);
+        await vscode.languages.setTextDocumentLanguage(document, format === 'markdown' ? 'markdown' : format === 'html' ? 'html' : 'plaintext');
+
+        if (vscode.workspace.getConfiguration('aggregateOpenTabs').get<boolean>('openInNewWindow', false)) {
+            await openInNewWindow(document);
+            return;
+        }
+
+        // Show in current window with a unique view column
+        const editor = await vscode.window.showTextDocument(document, {
+            preview: false, // Prevent the editor from reusing the same tab
+            viewColumn: vscode.ViewColumn.Beside,
+            preserveFocus: false // Give focus to the aggregated content
         });
 
         // Add folding regions for better navigation
@@ -526,30 +566,39 @@ async function showAggregatedContent(content: string, format: string): Promise<v
             }, [] as { start: number; end?: number }[]);
 
             if (foldingRanges.length > 0) {
-                editor.setDecorations(vscode.window.createTextEditorDecorationType({
+                const decorationType = vscode.window.createTextEditorDecorationType({
                     isWholeLine: true,
                     backgroundColor: new vscode.ThemeColor('editor.foldBackground')
-                }), foldingRanges.map(range => new vscode.Range(
+                });
+                
+                editor.setDecorations(decorationType, foldingRanges.map(range => new vscode.Range(
                     range.start, 0,
                     range.end || content.split('\n').length - 1, 0
                 )));
             }
         }
+
+        // Log success for debugging
+        console.log(`Successfully created aggregated document "${title}" with ${content.split('\n').length} lines`);
+        
+    } catch (error) {
+        vscode.window.showErrorMessage(`Error showing aggregated content: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
 async function copyAggregatedContent(): Promise<void> {
     try {
         const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
-        const openFiles = vscode.workspace.textDocuments.filter(doc => 
-            !doc.isUntitled && 
-            !doc.uri.scheme.startsWith('output') &&
-            !doc.uri.scheme.startsWith('debug') &&
-            doc.uri.scheme === 'file'
-        );
+        const openFiles = vscode.window.visibleTextEditors
+            .map(editor => editor.document)
+            .filter(doc => 
+                !doc.isUntitled && 
+                doc.uri.scheme === 'file' &&
+                !shouldIgnoreFile(doc.fileName)
+            );
 
         if (openFiles.length === 0) {
-            vscode.window.showInformationMessage('No files open to aggregate.');
+            vscode.window.showInformationMessage('No editor tabs found to aggregate.');
             return;
         }
 
