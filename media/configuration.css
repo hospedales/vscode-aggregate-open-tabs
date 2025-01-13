@@ -79,5 +79,23 @@ button:hover {
 .pattern-actions {
     display: flex;
     align-items: center;
+    gap: 8px;
     margin-top: 8px;
+}
+
+.pattern-actions input {
+    flex: 1;
+}
+
+.pattern-actions button {
+    white-space: nowrap;
+}
+
+.pattern-item input {
+    flex: 1;
+    margin-right: 8px;
+}
+
+.pattern-item button {
+    flex-shrink: 0;
 } 

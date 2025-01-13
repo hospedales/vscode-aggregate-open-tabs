@@ -41,6 +41,17 @@ export class ConfigurationPanel {
             this._disposables
         );
 
+        // Listen for configuration changes
+        vscode.workspace.onDidChangeConfiguration(
+            async (e) => {
+                if (e.affectsConfiguration('aggregateOpenTabs')) {
+                    await this._updateWebview();
+                }
+            },
+            null,
+            this._disposables
+        );
+
         // Initial update of the webview content
         this._updateWebview();
     }
@@ -95,7 +106,6 @@ export class ConfigurationPanel {
     }
 
     private _getWebviewContent(webview: vscode.Webview) {
-        // Get the local path to script and convert it to a uri we can use in the webview
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'media', 'configuration.js')
         );
@@ -104,7 +114,6 @@ export class ConfigurationPanel {
             vscode.Uri.joinPath(this._extensionUri, 'media', 'configuration.css')
         );
 
-        // Use a nonce to only allow a specific script to be run
         const nonce = getNonce();
 
         return `<!DOCTYPE html>
@@ -132,8 +141,8 @@ export class ConfigurationPanel {
                 <div class="setting-group">
                     <div class="pattern-list" id="excludePatterns"></div>
                     <div class="pattern-actions">
-                        <input type="text" id="newExcludePattern" placeholder="Enter glob pattern (e.g., **/*.log)" style="width: calc(100% - 100px); margin-right: 8px;">
-                        <button onclick="addExcludePattern()">Add</button>
+                        <input type="text" id="newExcludePattern" placeholder="Enter glob pattern (e.g., **/*.log)">
+                        <button id="addExcludePatternBtn">Add</button>
                     </div>
                 </div>
             </div>
@@ -189,7 +198,10 @@ export class ConfigurationPanel {
                 </div>
                 <div class="setting-group">
                     <div id="redactionPatterns" class="pattern-list"></div>
-                    <button onclick="addRedactionPattern()">Add Redaction Pattern</button>
+                    <div class="pattern-actions">
+                        <input type="text" id="newRedactionPattern" placeholder="Enter regex pattern">
+                        <button id="addRedactionPatternBtn">Add</button>
+                    </div>
                 </div>
             </div>
 

@@ -49,13 +49,11 @@ function updatePatternList(id, patterns) {
         const input = document.createElement('input');
         input.type = 'text';
         input.value = pattern;
-        input.style.flex = '1';
-        input.style.marginRight = '8px';
         input.addEventListener('change', (e) => updatePattern(id, index, e.target.value));
         
         const removeBtn = document.createElement('button');
         removeBtn.textContent = 'Remove';
-        removeBtn.onclick = () => removePattern(id, index);
+        removeBtn.addEventListener('click', () => removePattern(id, index));
         
         div.appendChild(input);
         div.appendChild(removeBtn);
@@ -63,23 +61,53 @@ function updatePatternList(id, patterns) {
     });
 }
 
-function addExcludePattern() {
-    const input = document.getElementById('newExcludePattern');
+function addPattern(inputId, listId) {
+    const input = document.getElementById(inputId);
     const pattern = input.value.trim();
     
     if (pattern) {
-        const patterns = [...(settings.excludePatterns || [])];
+        const key = listId === 'redactionPatterns' ? 'customRedactionPatterns' : listId;
+        const patterns = [...(settings[key] || [])];
         patterns.push(pattern);
-        updateSetting('excludePatterns', patterns);
+        updateSetting(key, patterns);
         input.value = ''; // Clear the input
     }
 }
 
-function addRedactionPattern() {
-    const patterns = [...(settings.customRedactionPatterns || [])];
-    patterns.push('');  // Add empty pattern for editing
-    updateSetting('customRedactionPatterns', patterns);
-}
+// Add event listeners for pattern management
+document.addEventListener('DOMContentLoaded', () => {
+    // Exclude patterns
+    const addExcludeBtn = document.getElementById('addExcludePatternBtn');
+    const newExcludeInput = document.getElementById('newExcludePattern');
+    
+    addExcludeBtn.addEventListener('click', () => addPattern('newExcludePattern', 'excludePatterns'));
+    newExcludeInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            addPattern('newExcludePattern', 'excludePatterns');
+        }
+    });
+
+    // Redaction patterns
+    const addRedactionBtn = document.getElementById('addRedactionPatternBtn');
+    const newRedactionInput = document.getElementById('newRedactionPattern');
+    
+    addRedactionBtn.addEventListener('click', () => addPattern('newRedactionPattern', 'redactionPatterns'));
+    newRedactionInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            addPattern('newRedactionPattern', 'redactionPatterns');
+        }
+    });
+
+    // Add change listeners to all inputs
+    document.querySelectorAll('input[type="checkbox"], select, input[type="number"]').forEach(input => {
+        input.addEventListener('change', () => {
+            const value = input.type === 'checkbox' ? input.checked : 
+                        input.type === 'number' ? parseInt(input.value, 10) : 
+                        input.value;
+            updateSetting(input.id, value);
+        });
+    });
+});
 
 function updatePattern(listId, index, value) {
     const key = listId === 'redactionPatterns' ? 'customRedactionPatterns' : listId;
@@ -94,23 +122,6 @@ function removePattern(listId, index) {
     patterns.splice(index, 1);
     updateSetting(key, patterns);
 }
-
-// Add change listeners to all inputs
-document.querySelectorAll('input[type="checkbox"], select, input[type="number"]').forEach(input => {
-    input.addEventListener('change', () => {
-        const value = input.type === 'checkbox' ? input.checked : 
-                    input.type === 'number' ? parseInt(input.value, 10) : 
-                    input.value;
-        updateSetting(input.id, value);
-    });
-});
-
-// Add enter key handler for the new pattern input
-document.getElementById('newExcludePattern').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        addExcludePattern();
-    }
-});
 
 function updateSetting(key, value) {
     settings[key] = value;
