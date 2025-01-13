@@ -1,14 +1,22 @@
 import * as vscode from 'vscode';
+import { analyzeFile } from './analyzer';
 
 export class AggregateTreeItem extends vscode.TreeItem {
     constructor(
         public readonly label: string,
         public readonly collapsibleState: vscode.TreeItemCollapsibleState,
+        public readonly document?: vscode.TextDocument,
         command?: vscode.Command
     ) {
         super(label, collapsibleState);
         if (command) {
             this.command = command;
+        }
+        if (document) {
+            this.description = document.languageId;
+            this.tooltip = document.fileName;
+            this.iconPath = vscode.ThemeIcon.File;
+            this.contextValue = 'file';
         }
     }
 }
@@ -20,9 +28,58 @@ interface FileStats {
     totalSize: number;
 }
 
-export class AggregateTreeProvider implements vscode.TreeDataProvider<AggregateTreeItem> {
+export class AggregateTreeProvider implements 
+    vscode.TreeDataProvider<AggregateTreeItem>,
+    vscode.TreeDragAndDropController<AggregateTreeItem> {
+
     private _onDidChangeTreeData: vscode.EventEmitter<AggregateTreeItem | undefined | null | void> = new vscode.EventEmitter<AggregateTreeItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<AggregateTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
+
+    private fileOrder: string[] = [];
+
+    // Implement drag and drop interface
+    readonly dragMimeTypes = ['application/vnd.code.tree.aggregateOpenTabsView'];
+    readonly dropMimeTypes = ['application/vnd.code.tree.aggregateOpenTabsView'];
+
+    constructor() {
+        // Set up drag and drop
+        vscode.workspace.onDidChangeTextDocument(() => this.refresh());
+    }
+
+    // Handle drag
+    public async handleDrag(source: readonly AggregateTreeItem[], dataTransfer: vscode.DataTransfer, _token: vscode.CancellationToken): Promise<void> {
+        if (source.length === 0 || !source[0].document) {
+            return;
+        }
+
+        dataTransfer.set('application/vnd.code.tree.aggregateOpenTabsView', new vscode.DataTransferItem(source[0].document.fileName));
+    }
+
+    // Handle drop
+    public async handleDrop(target: AggregateTreeItem | undefined, dataTransfer: vscode.DataTransfer, _token: vscode.CancellationToken): Promise<void> {
+        const transferItem = dataTransfer.get('application/vnd.code.tree.aggregateOpenTabsView');
+        if (!transferItem || !target || !target.document) {
+            return;
+        }
+
+        const sourceFileName = transferItem.value;
+        const targetFileName = target.document.fileName;
+
+        const sourceIndex = this.fileOrder.indexOf(sourceFileName);
+        const targetIndex = this.fileOrder.indexOf(targetFileName);
+
+        if (sourceIndex === -1) {
+            // Source is new, insert it at target position
+            this.fileOrder.splice(targetIndex, 0, sourceFileName);
+        } else {
+            // Reorder existing items
+            this.fileOrder.splice(sourceIndex, 1);
+            const newTargetIndex = this.fileOrder.indexOf(targetFileName);
+            this.fileOrder.splice(newTargetIndex, 0, sourceFileName);
+        }
+
+        this.refresh();
+    }
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
@@ -77,6 +134,33 @@ export class AggregateTreeProvider implements vscode.TreeDataProvider<AggregateT
     }
 
     async getChildren(element?: AggregateTreeItem): Promise<AggregateTreeItem[]> {
+        if (element?.document) {
+            // Show file analysis
+            const analysis = await analyzeFile(element.document);
+            const items: AggregateTreeItem[] = [];
+
+            if (analysis.frameworks.length > 0) {
+                items.push(new AggregateTreeItem(
+                    `Frameworks: ${analysis.frameworks.join(', ')}`,
+                    vscode.TreeItemCollapsibleState.None
+                ));
+            }
+
+            items.push(new AggregateTreeItem(
+                `Purpose: ${analysis.purpose}`,
+                vscode.TreeItemCollapsibleState.None
+            ));
+
+            if (analysis.exports.length > 0) {
+                items.push(new AggregateTreeItem(
+                    `Exports: ${analysis.exports.join(', ')}`,
+                    vscode.TreeItemCollapsibleState.None
+                ));
+            }
+
+            return items;
+        }
+
         if (element) {
             return [];
         }
@@ -88,12 +172,54 @@ export class AggregateTreeProvider implements vscode.TreeDataProvider<AggregateT
         items.push(new AggregateTreeItem(
             `Aggregate ${stats.totalFiles} Open Files`,
             vscode.TreeItemCollapsibleState.None,
+            undefined,
             {
                 command: 'extension.aggregateOpenTabs',
                 title: 'Aggregate Open Tabs',
                 tooltip: 'Combine all open tabs into one file'
             }
         ));
+
+        // Add open files section
+        const openDocs = vscode.workspace.textDocuments.filter(doc => 
+            !doc.isUntitled && 
+            !doc.uri.scheme.startsWith('output') &&
+            !doc.uri.scheme.startsWith('debug') &&
+            doc.uri.scheme === 'file'
+        );
+
+        // Sort files based on stored order or default to alphabetical
+        const sortedDocs = this.fileOrder.length > 0
+            ? openDocs.sort((a, b) => {
+                const indexA = this.fileOrder.indexOf(a.fileName);
+                const indexB = this.fileOrder.indexOf(b.fileName);
+                if (indexA === -1 && indexB === -1) return a.fileName.localeCompare(b.fileName);
+                if (indexA === -1) return 1;
+                if (indexB === -1) return -1;
+                return indexA - indexB;
+            })
+            : openDocs.sort((a, b) => a.fileName.localeCompare(b.fileName));
+
+        if (sortedDocs.length > 0) {
+            const filesItem = new AggregateTreeItem(
+                "Open Files",
+                vscode.TreeItemCollapsibleState.Expanded
+            );
+            items.push(filesItem);
+
+            for (const doc of sortedDocs) {
+                items.push(new AggregateTreeItem(
+                    doc.fileName,
+                    vscode.TreeItemCollapsibleState.Collapsed,
+                    doc,
+                    {
+                        command: 'vscode.open',
+                        title: 'Open File',
+                        arguments: [doc.uri]
+                    }
+                ));
+            }
+        }
 
         // Add file statistics section
         const statsItem = new AggregateTreeItem(
@@ -164,6 +290,7 @@ export class AggregateTreeProvider implements vscode.TreeDataProvider<AggregateT
         items.push(new AggregateTreeItem(
             `Auto-save: ${autoSave ? 'Enabled' : 'Disabled'}`,
             vscode.TreeItemCollapsibleState.None,
+            undefined,
             {
                 command: 'workbench.action.openSettings',
                 title: 'Open Settings',
@@ -174,6 +301,7 @@ export class AggregateTreeProvider implements vscode.TreeDataProvider<AggregateT
         items.push(new AggregateTreeItem(
             `File Types: ${fileTypesDisplay}`,
             vscode.TreeItemCollapsibleState.None,
+            undefined,
             {
                 command: 'workbench.action.openSettings',
                 title: 'Open Settings',

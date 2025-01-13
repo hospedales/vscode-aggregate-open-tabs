@@ -5,15 +5,15 @@ import { createFormatter } from './formatters';
 import { selectFilesToAggregate } from './selectiveAggregation';
 import { detectSensitiveData, redactSensitiveData } from './security';
 import { StorageManager } from './storage';
-import { EnhancedTreeProvider } from './treeView';
+import { AggregateTreeProvider } from './aggregateTreeProvider';
 import { analyzeFile } from './analyzer';
 
-let treeDataProvider: EnhancedTreeProvider;
+let treeDataProvider: AggregateTreeProvider;
 let storageManager: StorageManager;
 
 export async function activate(context: vscode.ExtensionContext) {
     // Initialize providers and managers
-    treeDataProvider = new EnhancedTreeProvider();
+    treeDataProvider = new AggregateTreeProvider();
     storageManager = new StorageManager(context);
 
     // Register tree view
