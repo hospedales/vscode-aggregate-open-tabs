@@ -27,7 +27,8 @@
         {
           "id": "aggregateOpenTabsView",
           "name": "Aggregate Files",
-          "type": "tree"
+          "type": "tree",
+          "dragAndDropController": "aggregateOpenTabsView"
         }
       ]
     },
@@ -52,6 +53,18 @@
       {
         "command": "extension.openInNewWindow",
         "title": "Open Aggregated File in New Window"
+      },
+      {
+        "command": "extension.uploadToGist",
+        "title": "Upload Aggregated Content to GitHub Gist"
+      },
+      {
+        "command": "extension.saveSnapshot",
+        "title": "Save Current Aggregation as Snapshot"
+      },
+      {
+        "command": "extension.loadSnapshot",
+        "title": "Load Previous Aggregation Snapshot"
       }
     ],
     "menus": {
@@ -70,6 +83,11 @@
         },
         {
           "command": "extension.openInNewWindow",
+          "when": "viewItem == aggregatedFile",
+          "group": "inline"
+        },
+        {
+          "command": "extension.uploadToGist",
           "when": "viewItem == aggregatedFile",
           "group": "inline"
         }
@@ -102,10 +120,22 @@
           "description": "List of file extensions to include (e.g., [\".ts\", \".js\"]). Leave empty [] or set to [\"*\"] to include all file types.",
           "examples": [
             [],
-            ["*"],
-            [".ts", ".js", ".tsx"],
-            [".py", ".ipynb"],
-            [".java", ".kt"]
+            [
+              "*"
+            ],
+            [
+              ".ts",
+              ".js",
+              ".tsx"
+            ],
+            [
+              ".py",
+              ".ipynb"
+            ],
+            [
+              ".java",
+              ".kt"
+            ]
           ]
         },
         "aggregateOpenTabs.chunkSize": {
@@ -118,7 +148,11 @@
           "items": {
             "type": "string"
           },
-          "default": ["**/*.env", "**/*.lock", "**/node_modules/**"],
+          "default": [
+            "**/*.env",
+            "**/*.lock",
+            "**/node_modules/**"
+          ],
           "description": "Glob patterns for files to exclude from aggregation."
         },
         "aggregateOpenTabs.addSummaries": {
@@ -130,6 +164,60 @@
           "type": "boolean",
           "default": false,
           "description": "Open aggregated file in a new VS Code window by default."
+        },
+        "aggregateOpenTabs.sensitiveDataHandling": {
+          "type": "string",
+          "enum": [
+            "warn",
+            "redact",
+            "skip",
+            "ignore"
+          ],
+          "default": "warn",
+          "description": "How to handle potentially sensitive data (API keys, passwords, etc.)"
+        },
+        "aggregateOpenTabs.customRedactionPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional regex patterns to detect sensitive data."
+        },
+        "aggregateOpenTabs.outputFormat": {
+          "type": "string",
+          "enum": [
+            "plaintext",
+            "markdown",
+            "html"
+          ],
+          "default": "plaintext",
+          "description": "Format of the aggregated output."
+        },
+        "aggregateOpenTabs.keepSnapshots": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep historical snapshots of aggregated content."
+        },
+        "aggregateOpenTabs.maxSnapshots": {
+          "type": "number",
+          "default": 10,
+          "description": "Maximum number of historical snapshots to keep."
+        },
+        "aggregateOpenTabs.githubGistToken": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub personal access token for Gist creation (optional)."
+        },
+        "aggregateOpenTabs.enhancedSummaries": {
+          "type": "boolean",
+          "default": true,
+          "description": "Generate detailed summaries including framework detection and file purpose."
+        },
+        "aggregateOpenTabs.extraSpacing": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add extra blank lines around code blocks and sections for better readability."
         }
       }
     }
@@ -145,11 +233,17 @@
   "devDependencies": {
     "@types/node": "^16.x",
     "@types/vscode": "^1.74.0",
-    "typescript": "^4.x"
+    "typescript": "^4.x",
+    "@types/minimatch": "^5.1.2",
+    "@types/node-fetch": "^2.6.12"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/hospedales/vscode-aggregate-open-tabs.git"
   },
-  "publisher": "hospedales"
+  "publisher": "hospedales",
+  "dependencies": {
+    "minimatch": "^9.0.3",
+    "node-fetch": "^3.3.2"
+  }
 }
