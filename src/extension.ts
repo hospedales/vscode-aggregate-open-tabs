@@ -371,35 +371,26 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
         const includeDependencies = config.get<boolean>('includeDependencies', true);
         const aiSummaryStyle = config.get<'concise' | 'detailed'>('aiSummaryStyle', 'concise');
         const chunkSeparatorStyle = config.get<'double' | 'single' | 'minimal'>('chunkSeparatorStyle', 'double');
-        const codeFenceLanguageMap = config.get<Record<string, string>>('codeFenceLanguageMap', {
-            'typescriptreact': 'tsx',
-            'javascriptreact': 'jsx',
-            'typescript': 'ts',
-            'javascript': 'js',
-            'markdown': 'md',
-            'plaintext': 'text'
-        });
+        const codeFenceLanguageMap = config.get<Record<string, string>>('codeFenceLanguageMap', {});
 
         // Clear any previous selection state
         treeDataProvider.clearSelectedFiles();
 
-        // Get all visible editor tabs
-        let openFiles = vscode.window.visibleTextEditors
-            .map(editor => editor.document)
-            .filter(doc => 
-                !doc.isUntitled && 
-                doc.uri.scheme === 'file' &&
-                !shouldIgnoreFile(doc.fileName)
-            );
+        // Get ALL open text editors, not just visible ones
+        let openFiles = await vscode.workspace.textDocuments.filter(doc => 
+            !doc.isUntitled && 
+            doc.uri.scheme === 'file' &&
+            !shouldIgnoreFile(doc.fileName)
+        );
 
         // Log the number of files found for debugging
-        console.log(`Found ${openFiles.length} visible editor tabs`);
+        console.log(`Found ${openFiles.length} open files before filtering`);
         openFiles.forEach(doc => {
             console.log(`  - ${doc.fileName} (${doc.languageId})`);
         });
 
         if (openFiles.length === 0) {
-            vscode.window.showInformationMessage('No editor tabs found to aggregate. Please make sure you have files open in editor tabs.');
+            vscode.window.showInformationMessage('No files found to aggregate. Please open some files first.');
             return;
         }
 
@@ -491,7 +482,8 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
             includeImports,
             includeExports,
             includeDependencies,
-            aiSummaryStyle
+            aiSummaryStyle,
+            useCodeFences: config.get<boolean>('useCodeFences', true)
         });
 
         // Format all files at once
