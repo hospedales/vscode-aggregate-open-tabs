@@ -335,7 +335,8 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('extension.selectiveAggregate', () => aggregateFiles(true)),
         vscode.commands.registerCommand('extension.togglePreview', () => PreviewPanel.createOrShow(context.extensionUri)),
         vscode.commands.registerCommand('extension.copyAggregatedContent', copyAggregatedContent),
-        vscode.commands.registerCommand('extension.openConfiguration', () => ConfigurationPanel.createOrShow(context.extensionUri))
+        vscode.commands.registerCommand('extension.openConfiguration', () => ConfigurationPanel.createOrShow(context.extensionUri)),
+        vscode.commands.registerCommand('extension.refreshAggregateView', () => treeDataProvider.refresh())
     );
 
     // Register tree view
