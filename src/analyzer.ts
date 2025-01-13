@@ -3,6 +3,10 @@ import * as vscode from 'vscode';
 export interface AnalyzeOptions {
     tailored?: boolean;
     includeKeyPoints?: boolean;
+    includeImports?: boolean;
+    includeExports?: boolean;
+    includeDependencies?: boolean;
+    aiSummaryStyle?: 'concise' | 'detailed';
     languageMap?: Record<string, string>;
 }
 
@@ -21,18 +25,28 @@ export async function analyzeFile(
     const content = document.getText();
     const frameworks = detectFrameworks(content);
     const purpose = determinePurpose(document.fileName, content, document.languageId);
-    const { exports, imports } = extractExportsAndImports(content);
-    const dependencies = extractDependencies(content);
-    const { aiSummary, keyPoints } = generateAISummary(content, document.languageId);
+    
+    // Only extract imports/exports/dependencies if requested
+    const { exports, imports } = options.includeImports || options.includeExports ? 
+        extractExportsAndImports(content) : 
+        { exports: [], imports: [] };
+    
+    const dependencies = options.includeDependencies ? 
+        extractDependencies(content) : 
+        [];
+
+    // Generate AI summary with specified style
+    const { aiSummary, keyPoints } = options.includeKeyPoints ? 
+        generateAISummary(content, document.languageId, options.aiSummaryStyle) : 
+        { aiSummary: undefined, keyPoints: undefined };
 
     return {
         frameworks,
         purpose,
         dependencies,
-        exports,
-        imports,
-        aiSummary,
-        keyPoints
+        exports: options.includeExports ? exports : [],
+        imports: options.includeImports ? imports : [],
+        ...(options.includeKeyPoints ? { aiSummary, keyPoints } : {})
     };
 }
 
@@ -248,7 +262,7 @@ function determinePurpose(fileName: string, content: string, languageId: string)
     }
 }
 
-export function generateAISummary(content: string, languageId: string): { aiSummary: string; keyPoints: string[] } {
+export function generateAISummary(content: string, languageId: string, style: 'concise' | 'detailed' = 'detailed'): { aiSummary: string; keyPoints: string[] } {
     const lines = content.split('\n');
     const firstNonEmptyLine = lines.find(line => line.trim().length > 0) || '';
     
@@ -311,7 +325,7 @@ export function generateAISummary(content: string, languageId: string): { aiSumm
         keyPoints.push(`Has ${effects.length} side effect${effects.length !== 1 ? 's' : ''}`);
     }
 
-    // API and data fetching
+    // API calls
     if (content.includes('fetch(') || content.includes('axios')) {
         const fetchCalls = (content.match(/fetch\(/g) || []).length;
         const axiosCalls = (content.match(/axios\./g) || []).length;
@@ -321,10 +335,12 @@ export function generateAISummary(content: string, languageId: string): { aiSumm
     // Database operations
     if (content.includes('createClient') || content.includes('prisma') || content.includes('supabase')) {
         keyPoints.push('Performs database operations');
-        if (content.includes('select')) keyPoints.push('- Queries data');
-        if (content.includes('insert')) keyPoints.push('- Inserts records');
-        if (content.includes('update')) keyPoints.push('- Updates records');
-        if (content.includes('delete')) keyPoints.push('- Deletes records');
+        if (style === 'detailed') {
+            if (content.includes('select')) keyPoints.push('- Queries data');
+            if (content.includes('insert')) keyPoints.push('- Inserts records');
+            if (content.includes('update')) keyPoints.push('- Updates records');
+            if (content.includes('delete')) keyPoints.push('- Deletes records');
+        }
     }
 
     // Security and environment
@@ -340,40 +356,68 @@ export function generateAISummary(content: string, languageId: string): { aiSumm
     // TypeScript features
     if (content.includes('export type') || content.includes('export interface')) {
         const typeExports = (content.match(/export\s+(type|interface)/g) || []).length;
-        keyPoints.push(`Exports ${typeExports} type definition${typeExports !== 1 ? 's' : ''}`);
+        if (style === 'detailed') {
+            keyPoints.push(`Exports ${typeExports} type definition${typeExports !== 1 ? 's' : ''}`);
+        } else {
+            keyPoints.push('Exports type definitions');
+        }
     }
 
     // Performance optimizations
     if (content.includes('useMemo') || content.includes('useCallback')) {
         const memos = (content.match(/useMemo\(/g) || []).length;
         const callbacks = (content.match(/useCallback\(/g) || []).length;
-        keyPoints.push(`Uses ${memos + callbacks} performance optimization${memos + callbacks !== 1 ? 's' : ''}`);
+        if (style === 'detailed') {
+            keyPoints.push(`Uses ${memos + callbacks} performance optimization${memos + callbacks !== 1 ? 's' : ''}`);
+        } else {
+            keyPoints.push('Includes performance optimizations');
+        }
     }
 
     // UI/UX features
     if (content.includes('className=')) {
-        if (content.includes('dark:')) keyPoints.push('Implements dark mode support');
-        if (content.includes('md:') || content.includes('lg:')) keyPoints.push('Has responsive design');
-        if (content.includes('animate-') || content.includes('transition-')) keyPoints.push('Includes animations');
+        const features = [];
+        if (content.includes('dark:')) features.push('dark mode support');
+        if (content.includes('md:') || content.includes('lg:')) features.push('responsive design');
+        if (content.includes('animate-') || content.includes('transition-')) features.push('animations');
+        if (features.length > 0) {
+            if (style === 'detailed') {
+                features.forEach(feature => keyPoints.push(`Implements ${feature}`));
+            } else {
+                keyPoints.push(`Includes ${features.join(', ')}`);
+            }
+        }
     }
     
-    // Generate a detailed summary
+    // Generate a summary based on style
     let summary = purposes.length > 0 
         ? purposes.join(' ')
         : 'Utility file';
 
-    // Add key functionality to summary
-    const keyFunctionality = keyPoints
-        .filter(point => !point.startsWith('-')) // Filter out sub-points
-        .map(point => point.toLowerCase())
-        .join(', ');
+    if (style === 'detailed') {
+        // Add key functionality to summary
+        const keyFunctionality = keyPoints
+            .filter(point => !point.startsWith('-')) // Filter out sub-points
+            .map(point => point.toLowerCase())
+            .join(', ');
 
-    if (keyFunctionality) {
-        summary += ` that ${keyFunctionality}`;
+        if (keyFunctionality) {
+            summary += ` that ${keyFunctionality}`;
+        }
+    } else {
+        // For concise style, keep only the main purpose and most important features
+        const mainFeatures = keyPoints
+            .filter(point => !point.startsWith('-'))
+            .slice(0, 2) // Take only the first two main features
+            .map(point => point.toLowerCase());
+
+        if (mainFeatures.length > 0) {
+            summary += ` with ${mainFeatures.join(' and ')}`;
+        }
     }
     
     return {
         aiSummary: summary,
-        keyPoints: keyPoints.filter(point => point.trim().length > 0) // Remove empty points
+        keyPoints: style === 'detailed' ? keyPoints : keyPoints.filter(point => !point.startsWith('-'))
     };
 } 

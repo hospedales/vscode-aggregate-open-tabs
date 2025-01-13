@@ -3,10 +3,10 @@ import * as path from 'path';
 import { FileMetadata, getFileMetadata, shouldIgnoreFile } from './utils';
 import { createFormatter } from './formatters';
 import { selectFilesToAggregate } from './selectiveAggregation';
-import { detectSensitiveData, redactSensitiveData } from './security';
+import { analyzeFile } from './analyzer';
 import { StorageManager } from './storage';
 import { AggregateTreeProvider } from './aggregateTreeProvider';
-import { analyzeFile } from './analyzer';
+import { detectSensitiveData, redactSensitiveData } from './security';
 
 let treeDataProvider: AggregateTreeProvider;
 let storageManager: StorageManager;
@@ -43,11 +43,16 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
         const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
         const chunkSize = config.get<number>('chunkSize', 2000);
         const sensitiveDataHandling = config.get<string>('sensitiveDataHandling', 'warn');
+        const customRedactionPatterns = config.get<string[]>('customRedactionPatterns', []);
         const outputFormat = config.get<string>('outputFormat', 'plaintext');
         const extraSpacing = config.get<boolean>('extraSpacing', true);
         const enhancedSummaries = config.get<boolean>('enhancedSummaries', true);
         const tailoredSummaries = config.get<boolean>('tailoredSummaries', true);
         const includeKeyPoints = config.get<boolean>('includeKeyPoints', true);
+        const includeImports = config.get<boolean>('includeImports', true);
+        const includeExports = config.get<boolean>('includeExports', true);
+        const includeDependencies = config.get<boolean>('includeDependencies', true);
+        const aiSummaryStyle = config.get<'concise' | 'detailed'>('aiSummaryStyle', 'concise');
         const chunkSeparatorStyle = config.get<'double' | 'single' | 'minimal'>('chunkSeparatorStyle', 'double');
         const codeFenceLanguageMap = config.get<Record<string, string>>('codeFenceLanguageMap', {
             'typescriptreact': 'tsx',
@@ -82,11 +87,42 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
                 try {
                     const metadata = getFileMetadata(doc.fileName, doc.getText(), doc.languageId);
                     
+                    // Check for sensitive data
+                    if (sensitiveDataHandling !== 'ignore') {
+                        const content = doc.getText();
+                        const sensitiveMatches = await detectSensitiveData(content, customRedactionPatterns);
+                        if (sensitiveMatches.length > 0) {
+                            switch (sensitiveDataHandling) {
+                                case 'warn':
+                                    const message = `Sensitive data detected in ${path.basename(doc.fileName)}. Proceed?`;
+                                    const proceed = await vscode.window.showWarningMessage(
+                                        message,
+                                        { modal: true },
+                                        'Yes',
+                                        'No'
+                                    );
+                                    if (proceed !== 'Yes') {
+                                        return null;
+                                    }
+                                    break;
+                                case 'redact':
+                                    metadata.content = await redactSensitiveData(content, sensitiveMatches);
+                                    break;
+                                case 'skip':
+                                    return null;
+                            }
+                        }
+                    }
+
                     // Enhanced file analysis with tailored summaries
                     if (enhancedSummaries) {
                         const analysis = await analyzeFile(doc, {
                             tailored: tailoredSummaries,
                             includeKeyPoints,
+                            includeImports,
+                            includeExports,
+                            includeDependencies,
+                            aiSummaryStyle,
                             languageMap: codeFenceLanguageMap
                         });
                         metadata.analysis = analysis;

@@ -30,11 +30,8 @@ const SENSITIVE_PATTERNS = [
     }
 ];
 
-export async function detectSensitiveData(content: string): Promise<SensitiveMatch[]> {
+export async function detectSensitiveData(content: string, customPatterns: string[] = []): Promise<SensitiveMatch[]> {
     try {
-        const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
-        const customPatterns = config.get<string[]>('customRedactionPatterns', []);
-        
         const matches: SensitiveMatch[] = [];
         
         // Check built-in patterns
