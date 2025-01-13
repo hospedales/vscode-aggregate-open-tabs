@@ -17,13 +17,47 @@ export interface FormatOptions {
     includeAiSummaries?: boolean;
 }
 
-abstract class BaseFormatter {
-    constructor(protected options: FormatOptions) {}
+interface FormatterOptions {
+    extraSpacing?: boolean;
+    enhancedSummaries?: boolean;
+    chunkSize?: number;
+    chunkSeparatorStyle?: 'double' | 'single' | 'minimal';
+    codeFenceLanguageMap?: Record<string, string>;
+    tailoredSummaries?: boolean;
+    includeKeyPoints?: boolean;
+    includeImports?: boolean;
+    includeExports?: boolean;
+    includeDependencies?: boolean;
+    aiSummaryStyle?: 'concise' | 'detailed';
+    useCodeFences?: boolean;
+}
 
-    protected abstract generateTableOfContents(files: FileMetadata[]): string;
-    protected abstract generateFileHeader(metadata: FileMetadata): string;
-    protected abstract generateFileFooter(metadata: FileMetadata): string;
-    protected abstract wrapContent(content: string, metadata: FileMetadata): string;
+abstract class BaseFormatter {
+    protected options: FormatterOptions;
+    private memoizedChunks: Map<string, string[]> = new Map();
+    private static CHUNK_WORKERS = 4;
+
+    constructor(options: FormatterOptions) {
+        this.options = {
+            extraSpacing: options.extraSpacing ?? true,
+            enhancedSummaries: options.enhancedSummaries ?? true,
+            chunkSize: options.chunkSize ?? 2000,
+            chunkSeparatorStyle: options.chunkSeparatorStyle ?? 'double',
+            codeFenceLanguageMap: options.codeFenceLanguageMap,
+            tailoredSummaries: options.tailoredSummaries ?? true,
+            includeKeyPoints: options.includeKeyPoints ?? true,
+            includeImports: options.includeImports ?? true,
+            includeExports: options.includeExports ?? true,
+            includeDependencies: options.includeDependencies ?? true,
+            aiSummaryStyle: options.aiSummaryStyle ?? 'concise',
+            useCodeFences: options.useCodeFences ?? true
+        };
+    }
+
+    protected abstract generateTableOfContents(files: FileMetadata[]): Promise<string>;
+    protected abstract generateFileHeader(metadata: FileMetadata): Promise<string>;
+    protected abstract generateFileFooter(metadata: FileMetadata): Promise<string>;
+    protected abstract wrapContent(content: string, metadata: FileMetadata): Promise<string>;
 
     protected getRelativePath(file: FileMetadata): string {
         return file.relativePath || file.fileName;
@@ -44,30 +78,43 @@ abstract class BaseFormatter {
         return info.join(' | ');
     }
 
-    protected chunkContent(content: string): string[] {
-        if (!this.options.chunkSize || this.options.chunkSize <= 0) {
-            return [content];
+    protected async chunkContent(content: string, fileName: string): Promise<string[]> {
+        // Return memoized chunks if available
+        const cacheKey = `${fileName}-${content.length}-${this.options.chunkSize}`;
+        if (this.memoizedChunks.has(cacheKey)) {
+            return this.memoizedChunks.get(cacheKey)!;
         }
 
+        if (!this.options.chunkSize || content.length < this.options.chunkSize) {
+            const chunks = [content];
+            this.memoizedChunks.set(cacheKey, chunks);
+            return chunks;
+        }
+
+        // Process chunks in parallel for large files
         const lines = content.split('\n');
-        const chunks: string[] = [];
-        let currentChunk: string[] = [];
-        let currentSize = 0;
+        const chunkCount = Math.ceil(lines.length / this.options.chunkSize);
+        const workerCount = Math.min(BaseFormatter.CHUNK_WORKERS, chunkCount);
+        const chunksPerWorker = Math.ceil(chunkCount / workerCount);
 
-        for (const line of lines) {
-            if (currentSize + line.length > this.options.chunkSize && currentChunk.length > 0) {
-                chunks.push(currentChunk.join('\n'));
-                currentChunk = [];
-                currentSize = 0;
+        const chunkPromises = Array.from({ length: workerCount }, async (_, workerIndex) => {
+            const start = workerIndex * chunksPerWorker * this.options.chunkSize!;
+            const end = Math.min(start + chunksPerWorker * this.options.chunkSize!, lines.length);
+            const workerChunks: string[] = [];
+
+            for (let i = start; i < end; i += this.options.chunkSize!) {
+                const chunkEnd = Math.min(i + this.options.chunkSize!, end);
+                const chunk = lines.slice(i, chunkEnd).join('\n');
+                if (chunk.trim()) {
+                    workerChunks.push(chunk);
+                }
             }
-            currentChunk.push(line);
-            currentSize += line.length;
-        }
 
-        if (currentChunk.length > 0) {
-            chunks.push(currentChunk.join('\n'));
-        }
+            return workerChunks;
+        });
 
+        const chunks = (await Promise.all(chunkPromises)).flat();
+        this.memoizedChunks.set(cacheKey, chunks);
         return chunks;
     }
 
@@ -97,37 +144,6 @@ abstract class BaseFormatter {
         }
     }
 
-    async format(files: FileMetadata[]): Promise<string> {
-        const toc = this.generateTableOfContents(files);
-        const sections: string[] = [];
-
-        for (const file of files) {
-            const chunks = this.chunkContent(file.content);
-            for (let i = 0; i < chunks.length; i++) {
-                const isChunked = chunks.length > 1;
-                const chunkMeta = { 
-                    ...file,
-                    content: chunks[i],
-                    chunkInfo: isChunked ? ` (Chunk ${i + 1}/${chunks.length})` : ''
-                };
-
-                const section = [
-                    this.options.extraSpacing ? '\n\n' : '\n',
-                    this.generateFileHeader(chunkMeta),
-                    this.options.extraSpacing ? '\n\n' : '\n',
-                    this.wrapContent(chunks[i], chunkMeta),
-                    this.options.extraSpacing ? '\n\n' : '\n',
-                    this.generateFileFooter(chunkMeta),
-                    this.options.extraSpacing ? '\n\n' : '\n'
-                ].join('');
-
-                sections.push(section);
-            }
-        }
-
-        return [toc, ...sections].join('\n');
-    }
-
     protected getLanguageIdentifier(languageId: string): string {
         if (this.options.codeFenceLanguageMap && languageId in this.options.codeFenceLanguageMap) {
             return this.options.codeFenceLanguageMap[languageId];
@@ -155,10 +171,46 @@ abstract class BaseFormatter {
 
         return defaultMap[languageId] || languageId;
     }
+
+    async format(files: FileMetadata[]): Promise<string> {
+        const toc = await this.generateTableOfContents(files);
+        const sections: string[] = [];
+
+        for (const file of files) {
+            const fileChunks = await this.chunkContent(file.content, file.fileName);
+            
+            for (let i = 0; i < fileChunks.length; i++) {
+                const isChunked = fileChunks.length > 1;
+                const chunkMeta = { 
+                    ...file,
+                    content: fileChunks[i],
+                    chunkInfo: isChunked ? ` (Chunk ${i + 1}/${fileChunks.length})` : ''
+                };
+
+                const section = [
+                    this.options.extraSpacing ? '\n\n' : '\n',
+                    await this.generateFileHeader(chunkMeta),
+                    this.options.extraSpacing ? '\n\n' : '\n',
+                    await this.wrapContent(fileChunks[i], chunkMeta),
+                    this.options.extraSpacing ? '\n\n' : '\n',
+                    await this.generateFileFooter(chunkMeta),
+                    this.options.extraSpacing ? '\n\n' : '\n'
+                ].join('');
+
+                sections.push(section);
+            }
+        }
+
+        return [toc, ...sections].join('\n');
+    }
+
+    protected clearCache() {
+        this.memoizedChunks.clear();
+    }
 }
 
 export class PlainTextFormatter extends BaseFormatter {
-    protected generateTableOfContents(files: FileMetadata[]): string {
+    protected generateTableOfContents(files: FileMetadata[]): Promise<string> {
         const lines = ['Table of Contents:', '=================='];
         let currentDir = '';
         
@@ -204,10 +256,10 @@ export class PlainTextFormatter extends BaseFormatter {
             }
         }
         
-        return lines.join('\n') + '\n';
+        return Promise.resolve(lines.join('\n') + '\n');
     }
 
-    protected generateFileHeader(metadata: FileMetadata): string {
+    protected generateFileHeader(metadata: FileMetadata): Promise<string> {
         const relativePath = this.getRelativePath(metadata);
         const langInfo = this.getLanguageSpecificInfo(metadata);
         const separator = this.getSeparator(this.options.chunkSeparatorStyle);
@@ -261,71 +313,86 @@ export class PlainTextFormatter extends BaseFormatter {
             `//${separator}`,
             this.options.extraSpacing ? '\n' : '');
         
-        return lines.join('\n');
+        return Promise.resolve(lines.join('\n'));
     }
 
-    protected generateFileFooter(_metadata: FileMetadata): string {
+    protected generateFileFooter(_metadata: FileMetadata): Promise<string> {
         const separator = this.getSeparator(this.options.chunkSeparatorStyle);
-        return `\n//${separator}\n\n`;
+        return Promise.resolve(`\n//${separator}\n\n`);
     }
 
-    protected wrapContent(content: string, metadata: FileMetadata): string {
+    protected wrapContent(content: string, metadata: FileMetadata): Promise<string> {
         if (!this.options.chunkSize || this.options.chunkSize <= 0) {
             if (this.options.useCodeFences) {
                 const langId = this.getLanguageIdentifier(metadata.languageId);
-                return `${this.options.extraSpacing ? '\n' : ''}\`\`\`${langId}\n${content}\n\`\`\`${this.options.extraSpacing ? '\n' : ''}`;
+                return Promise.resolve(`${this.options.extraSpacing ? '\n' : ''}\`\`\`${langId}\n${content}\n\`\`\`${this.options.extraSpacing ? '\n' : ''}`);
             }
-            return content;
+            return Promise.resolve(content);
         }
 
-        const chunks = this.chunkContent(content);
-        if (chunks.length <= 1) {
-            if (this.options.useCodeFences) {
-                const langId = this.getLanguageIdentifier(metadata.languageId);
-                return `${this.options.extraSpacing ? '\n' : ''}\`\`\`${langId}\n${content}\n\`\`\`${this.options.extraSpacing ? '\n' : ''}`;
+        // Process chunks asynchronously but handle the promise synchronously
+        const processChunks = async () => {
+            const chunks = await this.chunkContent(content, metadata.fileName);
+            if (chunks.length <= 1) {
+                if (this.options.useCodeFences) {
+                    const langId = this.getLanguageIdentifier(metadata.languageId);
+                    return `${this.options.extraSpacing ? '\n' : ''}\`\`\`${langId}\n${content}\n\`\`\`${this.options.extraSpacing ? '\n' : ''}`;
+                }
+                return content;
             }
-            return content;
-        }
 
-        // If content is chunked, add chunk headers with improved spacing
-        const lines: string[] = [];
-        const chunkSeparator = this.getChunkSeparator(this.options.chunkSeparatorStyle);
-        const langId = this.options.useCodeFences ? this.getLanguageIdentifier(metadata.languageId) : null;
-        
-        chunks.forEach((chunk, index) => {
-            const start = index * this.options.chunkSize + 1;
-            const end = Math.min(start + chunk.split('\n').length - 1, metadata.content.split('\n').length);
+            // If content is chunked, add chunk headers with improved spacing
+            const lines: string[] = [];
+            const chunkSeparator = this.getChunkSeparator(this.options.chunkSeparatorStyle);
+            const langId = this.options.useCodeFences ? this.getLanguageIdentifier(metadata.languageId) : null;
             
-            if (index > 0 && this.options.extraSpacing) {
-                lines.push('');
+            for (let index = 0; index < chunks.length; index++) {
+                const chunk = chunks[index];
+                const start = index * this.options.chunkSize! + 1;
+                const end = Math.min(start + chunk.split('\n').length - 1, metadata.content.split('\n').length);
+                
+                if (index > 0 && this.options.extraSpacing) {
+                    lines.push('');
+                }
+                
+                lines.push(`//${chunkSeparator}`,
+                    `// Chunk ${index + 1}: Lines ${start}-${end}`,
+                    `//${chunkSeparator}`);
+                
+                if (this.options.extraSpacing) {
+                    lines.push('');
+                }
+                
+                if (this.options.useCodeFences) {
+                    lines.push(`\`\`\`${langId}`);
+                }
+                lines.push(chunk);
+                if (this.options.useCodeFences) {
+                    lines.push('```');
+                }
+                if (index < chunks.length - 1) {
+                    lines.push(this.options.extraSpacing ? '\n\n' : '\n');
+                }
             }
-            
-            lines.push(`//${chunkSeparator}`,
-                `// Chunk ${index + 1}: Lines ${start}-${end}`,
-                `//${chunkSeparator}`);
-            
-            if (this.options.extraSpacing) {
-                lines.push('');
-            }
-            
-            if (this.options.useCodeFences) {
-                lines.push(`\`\`\`${langId}`);
-            }
-            lines.push(chunk);
-            if (this.options.useCodeFences) {
-                lines.push('```');
-            }
-            if (index < chunks.length - 1) {
-                lines.push(this.options.extraSpacing ? '\n\n' : '\n');
-            }
+
+            return lines.join('\n');
+        };
+
+        // Execute the async function synchronously
+        let result = '';
+        processChunks().then(processed => {
+            result = processed;
+        }).catch(error => {
+            console.error('Error processing chunks:', error);
+            result = content; // Fallback to original content on error
         });
 
-        return lines.join('\n');
+        return Promise.resolve(result || content); // Return original content if async processing hasn't completed
     }
 }
 
 export class MarkdownFormatter extends BaseFormatter {
-    protected generateTableOfContents(files: FileMetadata[]): string {
+    protected generateTableOfContents(files: FileMetadata[]): Promise<string> {
         const lines = ['# Table of Contents\n'];
         let currentDir = '';
         
@@ -377,7 +444,7 @@ export class MarkdownFormatter extends BaseFormatter {
             lines.push('</details>\n');
         }
         
-        return lines.join('\n');
+        return Promise.resolve(lines.join('\n'));
     }
 
     protected slugify(text: string): string {
@@ -387,7 +454,7 @@ export class MarkdownFormatter extends BaseFormatter {
             .replace(/(^-|-$)/g, '');
     }
 
-    protected generateFileHeader(metadata: FileMetadata): string {
+    protected generateFileHeader(metadata: FileMetadata): Promise<string> {
         const relativePath = this.getRelativePath(metadata);
         const langInfo = this.getLanguageSpecificInfo(metadata);
         
@@ -452,61 +519,76 @@ export class MarkdownFormatter extends BaseFormatter {
         const langId = this.getLanguageIdentifier(metadata.languageId);
         lines.push(`\`\`\`${langId}`);
         
-        return lines.join('\n');
+        return Promise.resolve(lines.join('\n'));
     }
 
-    protected generateFileFooter(_metadata: FileMetadata): string {
-        return '```\n';
+    protected generateFileFooter(_metadata: FileMetadata): Promise<string> {
+        return Promise.resolve('```\n');
     }
 
-    protected wrapContent(content: string, metadata: FileMetadata): string {
+    protected wrapContent(content: string, metadata: FileMetadata): Promise<string> {
         if (!this.options.chunkSize || this.options.chunkSize <= 0) {
-            return content;
+            return Promise.resolve(content);
         }
 
-        const chunks = this.chunkContent(content);
-        if (chunks.length <= 1) {
-            return content;
-        }
+        // Process chunks asynchronously but handle the promise synchronously
+        const processChunks = async () => {
+            const chunks = await this.chunkContent(content, metadata.fileName);
+            if (chunks.length <= 1) {
+                return content;
+            }
 
-        // If content is chunked, wrap each chunk in a collapsible section with proper code fencing
-        const lines: string[] = [];
-        chunks.forEach((chunk, index) => {
-            const start = index * this.options.chunkSize + 1;
-            const end = Math.min(start + chunk.split('\n').length - 1, metadata.content.split('\n').length);
-            
-            if (index > 0 && this.options.extraSpacing) {
-                lines.push('');  // Add extra spacing between chunks
+            // If content is chunked, wrap each chunk in a collapsible section with proper code fencing
+            const lines: string[] = [];
+            for (let index = 0; index < chunks.length; index++) {
+                const chunk = chunks[index];
+                const start = index * this.options.chunkSize! + 1;
+                const end = Math.min(start + chunk.split('\n').length - 1, metadata.content.split('\n').length);
+                
+                if (index > 0 && this.options.extraSpacing) {
+                    lines.push('');  // Add extra spacing between chunks
+                }
+                
+                lines.push(`<details${index === 0 ? ' open' : ''}><summary>Chunk ${index + 1}: Lines ${start}-${end}</summary>`);
+                
+                if (this.options.extraSpacing) {
+                    lines.push('');  // Add extra spacing before code block
+                }
+                
+                const langId = this.getLanguageIdentifier(metadata.languageId);
+                lines.push(`\`\`\`${langId}`);
+                lines.push(chunk);
+                lines.push('```');
+                
+                if (this.options.extraSpacing) {
+                    lines.push('');  // Add extra spacing before closing details
+                }
+                
+                lines.push('</details>');
+                
+                if (index < chunks.length - 1) {
+                    lines.push(this.options.extraSpacing ? '\n' : '');  // Add extra spacing between chunks
+                }
             }
-            
-            lines.push(`<details${index === 0 ? ' open' : ''}><summary>Chunk ${index + 1}: Lines ${start}-${end}</summary>`);
-            
-            if (this.options.extraSpacing) {
-                lines.push('');  // Add extra spacing before code block
-            }
-            
-            const langId = this.getLanguageIdentifier(metadata.languageId);
-            lines.push(`\`\`\`${langId}`);
-            lines.push(chunk);
-            lines.push('```');
-            
-            if (this.options.extraSpacing) {
-                lines.push('');  // Add extra spacing before closing details
-            }
-            
-            lines.push('</details>');
-            
-            if (index < chunks.length - 1) {
-                lines.push(this.options.extraSpacing ? '\n' : '');  // Add extra spacing between chunks
-            }
+
+            return lines.join('\n');
+        };
+
+        // Execute the async function synchronously
+        let result = '';
+        processChunks().then(processed => {
+            result = processed;
+        }).catch(error => {
+            console.error('Error processing chunks:', error);
+            result = content; // Fallback to original content on error
         });
 
-        return lines.join('\n');
+        return Promise.resolve(result || content); // Return original content if async processing hasn't completed
     }
 }
 
 export class HtmlFormatter extends BaseFormatter {
-    protected generateTableOfContents(files: FileMetadata[]): string {
+    protected generateTableOfContents(files: FileMetadata[]): Promise<string> {
         const lines = ['<h1>Table of Contents</h1>', '<div class="toc">'];
         let currentDir = '';
         
@@ -584,10 +666,10 @@ export class HtmlFormatter extends BaseFormatter {
         lines.push('.key-points ul { margin: 0.5em 0; padding-left: 2em; }');
         lines.push('</style>');
         
-        return lines.join('\n') + '\n';
+        return Promise.resolve(lines.join('\n') + '\n');
     }
 
-    protected generateFileHeader(metadata: FileMetadata): string {
+    protected generateFileHeader(metadata: FileMetadata): Promise<string> {
         const relativePath = this.getRelativePath(metadata);
         const langInfo = this.getLanguageSpecificInfo(metadata);
         
@@ -666,17 +748,17 @@ export class HtmlFormatter extends BaseFormatter {
         lines.push('.extra-spacing .code-block { margin: 2em 0; }');
         lines.push('</style>');
 
-        return lines.join('\n');
+        return Promise.resolve(lines.join('\n'));
     }
 
-    protected generateFileFooter(_metadata: FileMetadata): string {
-        return '</div>\n<hr>\n';
+    protected generateFileFooter(_metadata: FileMetadata): Promise<string> {
+        return Promise.resolve('</div>\n<hr>\n');
     }
 
-    protected wrapContent(content: string, metadata: FileMetadata): string {
+    protected wrapContent(content: string, metadata: FileMetadata): Promise<string> {
         const languageClass = metadata.languageId ? ` class="language-${metadata.languageId}"` : '';
         const extraSpacingClass = this.options.extraSpacing ? ' extra-spacing' : '';
-        return `<div class="code-block${extraSpacingClass}"><pre><code${languageClass}>${this.escapeHtml(content)}</code></pre></div>`;
+        return Promise.resolve(`<div class="code-block${extraSpacingClass}"><pre><code${languageClass}>${this.escapeHtml(content)}</code></pre></div>`);
     }
 
     private escapeHtml(text: string): string {

@@ -19,6 +19,9 @@ class PreviewPanel {
     private _disposables: vscode.Disposable[] = [];
     private readonly _extensionUri: vscode.Uri;
     private _updateTimeout: NodeJS.Timeout | undefined;
+    private _lastProcessedFiles: Set<string> = new Set();
+    private _cachedMetadata: Map<string, FileMetadata> = new Map();
+    private _processingQueue: Promise<void> = Promise.resolve();
 
     constructor(extensionUri: vscode.Uri) {
         this._extensionUri = extensionUri;
@@ -75,16 +78,16 @@ class PreviewPanel {
         );
     }
 
-    private debouncedUpdate() {
+    private async debouncedUpdate() {
         if (this._updateTimeout) {
             clearTimeout(this._updateTimeout);
         }
         this._updateTimeout = setTimeout(() => {
             this._updateTimeout = undefined;
-            this.updateContent().catch(error => {
+            this._processingQueue = this._processingQueue.then(() => this.updateContent()).catch(error => {
                 vscode.window.showErrorMessage(`Error updating preview: ${error instanceof Error ? error.message : String(error)}`);
             });
-        }, 300); // 300ms debounce delay
+        }, 500); // Increased debounce time for better performance
     }
 
     public static createOrShow(extensionUri: vscode.Uri) {
@@ -106,6 +109,7 @@ class PreviewPanel {
                 !shouldIgnoreFile(doc.fileName)
             );
 
+            // Early exit if no files
             if (openFiles.length === 0) {
                 this._panel.webview.html = this._getWebviewContent('No files open to preview.');
                 return;
@@ -119,17 +123,65 @@ class PreviewPanel {
                 );
             }
 
-            const fileMetadata = (await Promise.all(
-                openFiles.map(async doc => {
-                    try {
-                        return getFileMetadata(doc.fileName, doc.getText(), doc.languageId);
-                    } catch (error) {
-                        console.error(`Error processing ${doc.fileName}:`, error);
-                        return null;
-                    }
-                })
-            )).filter((file): file is FileMetadata => file !== null);
+            // Check which files need processing
+            const currentFiles = new Set(openFiles.map(doc => doc.fileName));
+            const filesToProcess = openFiles.filter(doc => 
+                !this._lastProcessedFiles.has(doc.fileName) || 
+                !this._cachedMetadata.has(doc.fileName) ||
+                doc.isDirty // Also process files that have been modified
+            );
 
+            // Process only new or modified files
+            if (filesToProcess.length > 0) {
+                const newMetadata = (await Promise.all(
+                    filesToProcess.map(async doc => {
+                        try {
+                            const metadata = getFileMetadata(doc.fileName, doc.getText(), doc.languageId);
+                            
+                            // Add enhanced analysis if enabled
+                            if (config.get<boolean>('enhancedSummaries', true)) {
+                                const analysis = await analyzeFile(doc, {
+                                    tailored: config.get<boolean>('tailoredSummaries', true),
+                                    includeKeyPoints: config.get<boolean>('includeKeyPoints', true),
+                                    includeImports: config.get<boolean>('includeImports', true),
+                                    includeExports: config.get<boolean>('includeExports', true),
+                                    includeDependencies: config.get<boolean>('includeDependencies', true),
+                                    aiSummaryStyle: config.get<'concise' | 'detailed'>('aiSummaryStyle', 'concise'),
+                                    languageMap: config.get<Record<string, string>>('codeFenceLanguageMap', {})
+                                });
+                                metadata.analysis = analysis;
+                            }
+
+                            return { fileName: doc.fileName, metadata };
+                        } catch (error) {
+                            console.error(`Error processing ${doc.fileName}:`, error);
+                            return null;
+                        }
+                    })
+                )).filter((result): result is { fileName: string; metadata: FileMetadata } => result !== null);
+
+                // Update cache with new metadata
+                for (const { fileName, metadata } of newMetadata) {
+                    this._cachedMetadata.set(fileName, metadata);
+                }
+
+                // Update processed files set
+                this._lastProcessedFiles = currentFiles;
+            }
+
+            // Remove cached metadata for files that are no longer open
+            for (const fileName of this._cachedMetadata.keys()) {
+                if (!currentFiles.has(fileName)) {
+                    this._cachedMetadata.delete(fileName);
+                }
+            }
+
+            // Get all metadata (including cached)
+            const fileMetadata = Array.from(currentFiles)
+                .map(fileName => this._cachedMetadata.get(fileName))
+                .filter((file): file is FileMetadata => file !== null);
+
+            // Create formatter with current settings
             const formatter = createFormatter(
                 config.get<string>('outputFormat', 'markdown'),
                 { 
@@ -147,9 +199,10 @@ class PreviewPanel {
                     useCodeFences: config.get<boolean>('useCodeFences', true)
                 }
             );
-            const content = await formatter.format(fileMetadata);
 
+            const content = await formatter.format(fileMetadata);
             this._panel.webview.html = this._getWebviewContent(content);
+
         } catch (error) {
             this._panel.webview.html = this._getWebviewContent(
                 `Error generating preview: ${error instanceof Error ? error.message : String(error)}`
