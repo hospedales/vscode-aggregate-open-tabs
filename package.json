@@ -231,11 +231,10 @@
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
+    "@types/minimatch": "^5.1.2",
     "@types/node": "^16.x",
     "@types/vscode": "^1.74.0",
-    "typescript": "^4.x",
-    "@types/minimatch": "^5.1.2",
-    "@types/node-fetch": "^2.6.12"
+    "typescript": "^4.x"
   },
   "repository": {
     "type": "git",
@@ -243,7 +242,8 @@
   },
   "publisher": "hospedales",
   "dependencies": {
+    "@types/node-fetch": "^2.6.12",
     "minimatch": "^9.0.3",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^2.7.0"
   }
 }
