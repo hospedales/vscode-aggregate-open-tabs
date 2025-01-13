@@ -7,6 +7,7 @@ import { analyzeFile } from './analyzer';
 import { StorageManager } from './storage';
 import { AggregateTreeProvider } from './aggregateTreeProvider';
 import { detectSensitiveData, redactSensitiveData } from './security';
+import { ConfigurationPanel } from './configurationUI';
 
 let treeDataProvider: AggregateTreeProvider;
 let storageManager: StorageManager;
@@ -281,7 +282,8 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('extension.aggregateOpenTabs', () => aggregateFiles(false)),
         vscode.commands.registerCommand('extension.selectiveAggregate', () => aggregateFiles(true)),
         vscode.commands.registerCommand('extension.togglePreview', () => PreviewPanel.createOrShow(context.extensionUri)),
-        vscode.commands.registerCommand('extension.copyAggregatedContent', copyAggregatedContent)
+        vscode.commands.registerCommand('extension.copyAggregatedContent', copyAggregatedContent),
+        vscode.commands.registerCommand('extension.openConfiguration', () => ConfigurationPanel.createOrShow(context.extensionUri))
     );
 
     // Register tree view

@@ -70,6 +70,11 @@
         "command": "extension.togglePreview",
         "title": "Toggle Aggregation Preview",
         "icon": "$(preview)"
+      },
+      {
+        "command": "extension.openConfiguration",
+        "title": "Open Aggregate Open Tabs Configuration",
+        "icon": "$(gear)"
       }
     ],
     "menus": {
@@ -80,7 +85,7 @@
           "group": "navigation"
         },
         {
-          "command": "extension.togglePreview",
+          "command": "extension.openConfiguration",
           "when": "view == aggregateOpenTabsView",
           "group": "navigation"
         }
