@@ -269,7 +269,7 @@ export function generateAISummary(content: string, languageId: string, style: 'c
     // Detect file purpose based on patterns
     const purposes: string[] = [];
     
-    // Enhanced React/Next.js detection
+    // Enhanced React/Next.js detection with more specific component types
     if (languageId === 'typescriptreact' || languageId === 'javascriptreact') {
         if (content.includes('use client')) {
             purposes.push('Interactive Client Component');
@@ -277,109 +277,157 @@ export function generateAISummary(content: string, languageId: string, style: 'c
             purposes.push('Server-Rendered Component');
         }
         
-        // Component type detection
-        if (content.includes('createContext')) purposes.push('with Context Management');
-        if (content.includes('useContext')) purposes.push('using Context');
+        // More specific component type detection
+        if (content.includes('createContext')) purposes.push('providing Context');
+        if (content.includes('useContext')) purposes.push('consuming Context');
         if (/layout\.[tj]sx?$/.test(firstNonEmptyLine)) purposes.push('Layout Component');
         if (/page\.[tj]sx?$/.test(firstNonEmptyLine)) purposes.push('Page Component');
-        if (content.includes('loading')) purposes.push('Loading State Handler');
-        if (content.includes('error')) purposes.push('Error Boundary');
+        if (content.includes('loading')) purposes.push('with Loading State');
+        if (content.includes('error')) purposes.push('with Error Handling');
+        
+        // Detect form handling
+        if (content.includes('onSubmit') || content.includes('handleSubmit')) {
+            purposes.push('handling Form Submission');
+        }
+        
+        // Detect data fetching patterns
+        if (content.includes('getServerSideProps') || content.includes('getStaticProps')) {
+            purposes.push('with Server-side Data Fetching');
+        }
+        if (content.includes('useEffect') && (content.includes('fetch') || content.includes('axios'))) {
+            purposes.push('with Client-side Data Fetching');
+        }
     }
     
-    // Enhanced API detection
-    if (content.includes('@api') || content.includes('api/')) {
+    // Enhanced API detection with specific HTTP methods and patterns
+    if (content.includes('@api') || content.includes('api/') || content.includes('route.ts')) {
         purposes.push('API Route');
-        if (content.includes('GET')) purposes.push('handling GET requests');
-        if (content.includes('POST')) purposes.push('handling POST requests');
-        if (content.includes('PUT')) purposes.push('handling PUT requests');
-        if (content.includes('DELETE')) purposes.push('handling DELETE requests');
+        const methods = [];
+        if (content.includes('GET')) methods.push('GET');
+        if (content.includes('POST')) methods.push('POST');
+        if (content.includes('PUT')) methods.push('PUT');
+        if (content.includes('DELETE')) methods.push('DELETE');
+        if (methods.length > 0) {
+            purposes.push(`handling ${methods.join('/')} requests`);
+        }
+        
+        // Detect specific API features
+        if (content.includes('middleware')) purposes.push('with Request Middleware');
+        if (content.includes('validate')) purposes.push('with Input Validation');
+        if (content.includes('cache')) purposes.push('with Response Caching');
     }
 
-    // Enhanced testing detection
+    // Enhanced testing detection with specific test types
     if (content.includes('test(') || content.includes('describe(')) {
         purposes.push('Test Suite');
-        if (content.includes('integration')) purposes.push('for Integration Tests');
-        if (content.includes('unit')) purposes.push('for Unit Tests');
-        if (content.includes('e2e')) purposes.push('for E2E Tests');
+        if (content.includes('integration')) purposes.push('for Integration Testing');
+        if (content.includes('unit')) purposes.push('for Unit Testing');
+        if (content.includes('e2e')) purposes.push('for End-to-End Testing');
+        if (content.includes('mock') || content.includes('spy')) purposes.push('using Test Doubles');
     }
 
-    // Enhanced type detection
+    // Enhanced type detection with specific features
     if (content.includes('type ') || content.includes('interface ')) {
         purposes.push('Type Definitions');
         if (content.includes('extends')) purposes.push('with Type Extensions');
         if (content.includes('implements')) purposes.push('with Interface Implementations');
+        if (content.includes('generic') || content.includes('<T>')) purposes.push('using Generics');
     }
     
     // Generate detailed key points
     const keyPoints: string[] = [];
     
-    // State management
+    // Enhanced state management detection
     if (content.includes('useState')) {
         const stateVars = content.match(/useState[<(][^>)]*[>)]?\([^)]*\)/g) || [];
-        keyPoints.push(`Manages ${stateVars.length} state variable${stateVars.length !== 1 ? 's' : ''}`);
+        if (stateVars.length > 0) {
+            keyPoints.push(`Manages ${stateVars.length} state variable${stateVars.length !== 1 ? 's' : ''}`);
+        }
     }
 
-    // Effect handling
+    // Enhanced effect handling with dependency tracking
     if (content.includes('useEffect')) {
         const effects = content.match(/useEffect\(/g) || [];
-        keyPoints.push(`Has ${effects.length} side effect${effects.length !== 1 ? 's' : ''}`);
+        const effectsWithDeps = content.match(/useEffect\([^[]*\[[^\]]*\]/g) || [];
+        if (effects.length > 0) {
+            keyPoints.push(`Contains ${effects.length} effect${effects.length !== 1 ? 's' : ''} (${effectsWithDeps.length} with dependencies)`);
+        }
     }
 
-    // API calls
+    // Enhanced API call detection with specific patterns
     if (content.includes('fetch(') || content.includes('axios')) {
         const fetchCalls = (content.match(/fetch\(/g) || []).length;
         const axiosCalls = (content.match(/axios\./g) || []).length;
-        keyPoints.push(`Makes ${fetchCalls + axiosCalls} API call${fetchCalls + axiosCalls !== 1 ? 's' : ''}`);
-    }
-
-    // Database operations
-    if (content.includes('createClient') || content.includes('prisma') || content.includes('supabase')) {
-        keyPoints.push('Performs database operations');
-        if (style === 'detailed') {
-            if (content.includes('select')) keyPoints.push('- Queries data');
-            if (content.includes('insert')) keyPoints.push('- Inserts records');
-            if (content.includes('update')) keyPoints.push('- Updates records');
-            if (content.includes('delete')) keyPoints.push('- Deletes records');
+        if (fetchCalls + axiosCalls > 0) {
+            const endpoints = content.match(/(fetch|axios\.get|axios\.post|axios\.put|axios\.delete)\(['"]([^'"]+)['"]/g) || [];
+            keyPoints.push(`Makes ${fetchCalls + axiosCalls} API call${fetchCalls + axiosCalls !== 1 ? 's' : ''} to ${endpoints.length} unique endpoint${endpoints.length !== 1 ? 's' : ''}`);
         }
     }
 
-    // Security and environment
-    if (content.includes('env.')) keyPoints.push('Uses environment variables for configuration');
-    if (content.includes('auth') || content.includes('session')) keyPoints.push('Implements authentication/authorization');
+    // Enhanced database operations detection
+    if (content.includes('createClient') || content.includes('prisma') || content.includes('supabase')) {
+        const operations = [];
+        if (content.includes('select') || content.includes('findMany') || content.includes('findFirst')) operations.push('queries');
+        if (content.includes('insert') || content.includes('create')) operations.push('creates');
+        if (content.includes('update') || content.includes('upsert')) operations.push('updates');
+        if (content.includes('delete')) operations.push('deletes');
+        
+        if (operations.length > 0) {
+            keyPoints.push(`Performs database operations: ${operations.join(', ')}`);
+        }
+    }
 
-    // Error handling
+    // Enhanced security and environment detection
+    if (content.includes('env.')) {
+        const envVars = content.match(/process\.env\.[A-Z_]+/g) || [];
+        if (envVars.length > 0) {
+            keyPoints.push(`Uses ${envVars.length} environment variable${envVars.length !== 1 ? 's' : ''}`);
+        }
+    }
+    
+    if (content.includes('auth') || content.includes('session')) {
+        const authFeatures = [];
+        if (content.includes('login') || content.includes('signIn')) authFeatures.push('authentication');
+        if (content.includes('role') || content.includes('permission')) authFeatures.push('authorization');
+        if (authFeatures.length > 0) {
+            keyPoints.push(`Implements ${authFeatures.join(' and ')}`);
+        }
+    }
+
+    // Enhanced error handling detection
     if (content.includes('try {')) {
         const tryCatches = (content.match(/try\s*{/g) || []).length;
-        keyPoints.push(`Contains ${tryCatches} error handling block${tryCatches !== 1 ? 's' : ''}`);
-    }
-
-    // TypeScript features
-    if (content.includes('export type') || content.includes('export interface')) {
-        const typeExports = (content.match(/export\s+(type|interface)/g) || []).length;
-        if (style === 'detailed') {
-            keyPoints.push(`Exports ${typeExports} type definition${typeExports !== 1 ? 's' : ''}`);
-        } else {
-            keyPoints.push('Exports type definitions');
+        const customErrors = content.includes('throw new Error') || content.includes('new CustomError');
+        if (tryCatches > 0) {
+            keyPoints.push(`Contains ${tryCatches} error handling block${tryCatches !== 1 ? 's' : ''}${customErrors ? ' with custom error handling' : ''}`);
         }
     }
 
-    // Performance optimizations
+    // Enhanced TypeScript feature detection
+    if (content.includes('export type') || content.includes('export interface')) {
+        const typeExports = (content.match(/export\s+(type|interface)/g) || []).length;
+        const typeImports = (content.match(/import\s+type/g) || []).length;
+        if (typeExports > 0 || typeImports > 0) {
+            keyPoints.push(`Defines ${typeExports} type${typeExports !== 1 ? 's' : ''} and imports ${typeImports} type${typeImports !== 1 ? 's' : ''}`);
+        }
+    }
+
+    // Enhanced performance optimization detection
     if (content.includes('useMemo') || content.includes('useCallback')) {
         const memos = (content.match(/useMemo\(/g) || []).length;
         const callbacks = (content.match(/useCallback\(/g) || []).length;
-        if (style === 'detailed') {
-            keyPoints.push(`Uses ${memos + callbacks} performance optimization${memos + callbacks !== 1 ? 's' : ''}`);
-        } else {
-            keyPoints.push('Includes performance optimizations');
+        if (memos + callbacks > 0) {
+            keyPoints.push(`Uses ${memos + callbacks} performance optimization${memos + callbacks !== 1 ? 's' : ''} (${memos} memoized values, ${callbacks} callbacks)`);
         }
     }
 
-    // UI/UX features
+    // Enhanced UI/UX feature detection
     if (content.includes('className=')) {
         const features = [];
         if (content.includes('dark:')) features.push('dark mode support');
         if (content.includes('md:') || content.includes('lg:')) features.push('responsive design');
         if (content.includes('animate-') || content.includes('transition-')) features.push('animations');
+        if (content.includes('hover:') || content.includes('focus:')) features.push('interactive states');
         if (features.length > 0) {
             if (style === 'detailed') {
                 features.forEach(feature => keyPoints.push(`Implements ${feature}`));
@@ -388,11 +436,11 @@ export function generateAISummary(content: string, languageId: string, style: 'c
             }
         }
     }
-    
+
     // Generate a summary based on style
     let summary = purposes.length > 0 
         ? purposes.join(' ')
-        : 'Utility file';
+        : 'General purpose file';
 
     if (style === 'detailed') {
         // Add key functionality to summary
