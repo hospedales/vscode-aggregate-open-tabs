@@ -379,6 +379,9 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
             'plaintext': 'text'
         });
 
+        // Clear any previous selection state
+        treeDataProvider.clearSelectedFiles();
+
         // Get open documents
         let openFiles = vscode.workspace.textDocuments
             .filter(doc => 
@@ -395,6 +398,8 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
                 return;
             }
             openFiles = selectedDocs;
+            // Update tree provider with selected files
+            treeDataProvider.setSelectedFiles(selectedDocs, true);
         }
 
         // Process each document with enhanced analysis
@@ -488,6 +493,9 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
 
     } catch (error) {
         vscode.window.showErrorMessage(`Error aggregating files: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+        // Always clear selection state after aggregation
+        treeDataProvider.clearSelectedFiles();
     }
 }
 

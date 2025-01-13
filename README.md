@@ -1,223 +1,170 @@
-# VSCode Aggregate Open Tabs Extension
+# Aggregate Open Tabs
 
-This is a proposed Visual Studio Code extension that collects code from all currently open tabs and combines it into one file. You can use it to quickly gather all your open files’ contents and send them to an LLM or any other tool that needs a single, consolidated file.
+**Aggregate Open Tabs** is a Visual Studio Code extension that helps you gather, preview, and manage all of your open files in one place. It also provides powerful features for analyzing file contents, generating summaries, chunking large files, and filtering out sensitive or unnecessary files before sharing or reviewing.
 
----
+## Features
 
-## Table of Contents
+- **Tree View Panel**  
+  - Displays a summary of open files, file statistics, and workspace distribution.  
+  - Supports drag-and-drop rearrangement of open tabs.  
+  - Offers commands like “Toggle Preview”, “Copy to Clipboard”, and “Aggregate # Open Files”.
 
-1. [Overview](#overview)  
-2. [Project Setup & Structure](#project-setup--structure)  
-3. [Activation & Command Definition](#activation--command-definition)  
-4. [Logic to Collect Text from Open Tabs](#logic-to-collect-text-from-open-tabs)  
-5. [Writing/Generating the Aggregated File](#writinggenerating-the-aggregated-file)  
-6. [Displaying the Aggregated File in a Split Editor](#displaying-the-aggregated-file-in-a-split-editor)  
-7. [User Flow](#user-flow)  
-8. [Edge Cases & Considerations](#edge-cases--considerations)  
-9. [Testing & Validation](#testing--validation)  
-10. [Publishing (Optional)](#publishing-optional)  
-11. [Summary of Requirements](#summary-of-requirements)  
+- **Aggregation**  
+  - Combine all open tabs (or only a selected subset) into a single document.  
+  - Automatically chunk long files for improved readability.  
+  - Generate AI-powered summaries, lists of imports/exports, dependencies, and more.
 
----
+- **File Analysis & Summaries**  
+  - Optional AI-based analysis of each file (framework detection, purpose, imports, exports, dependencies).  
+  - Choose between detailed or concise summaries, with or without code fences.
 
-## 1. Overview
+- **Sensitive Data Handling**  
+  - Detect or redact sensitive data using configurable patterns or environment variables.
 
-**Purpose**  
-This extension allows you to:
+- **Configurable Output**  
+  - Output can be formatted as **Markdown**, **Plain Text**, or **HTML**.  
+  - Control chunk separation style, code fence languages, extra spacing, and more.
 
-1. Collect the text content from all open editor tabs in VS Code.  
-2. Aggregate those contents into a single file.  
-3. Automatically open a new (and optionally split) editor tab with the aggregated file.  
+- **Preview Panel**  
+  - View the aggregated result in real time in a separate webview.  
+  - Automatically refreshes when files are edited.
 
-By providing a single command in VS Code, users can easily gather and send file content to an LLM or other processing tools.
+- **Selective Aggregation**  
+  - Quickly pick and choose which files to include via a Quick Pick interface.
 
----
+## Installation
 
-## 2. Project Setup & Structure
+### 1. From the VS Code Marketplace (Recommended)
 
-1. **Initial Files and Folders**  
-   - Create a new folder for your extension, e.g. `vscode-aggregate-open-tabs/`.
-   - Inside, you will have:
-     - **`package.json`** – Defines metadata (name, version, description, publisher, commands, activation events).  
-     - **`tsconfig.json`** – If using TypeScript, defines compilation settings.  
-     - **Extension source** – Typically at `src/extension.ts` (TypeScript) or `src/extension.js` (JavaScript).
+1. Open Visual Studio Code.
+2. Go to the **Extensions** view (`Ctrl+Shift+X` or `Cmd+Shift+X` on macOS).
+3. Search for "**Aggregate Open Tabs**".
+4. Click **Install**.
 
-2. **Dependencies**  
-   - **Node.js** and **npm** (or **yarn**).  
-   - **VS Code Extensions API** (`vscode` package) listed as a dependency in `package.json`.  
-   - **TypeScript** (recommended) or plain JavaScript.
+### 2. From a VSIX File (Manual)
 
-3. **VS Code Configuration** (optional but recommended)
-   - **`.vscode/launch.json`** – Defines how to run/debug the extension in an Extension Development Host.  
-   - **`.vscode/tasks.json`** – Automates build tasks.  
-   - **`.vscode/extensions.json`** – Lists recommended extensions for contributors.
+1. Download the `.vsix` file from the GitHub releases page (or from a local build).
+2. In VS Code, open the **Extensions** view.
+3. Click on the “...”(More Actions) in the top-right corner and select **Install from VSIX...**.
+4. Select the `.vsix` file to install.
 
----
+### 3. Building From Source (Advanced)
 
-## 3. Activation & Command Definition
+1. Clone this repository.
+2. Run `npm install` or `yarn install`.
+3. Press `F5` in VS Code to launch an Extension Development Host with the extension loaded.
 
-1. **Activation Event**  
-   - Add an activation event for the command in `package.json`. Example:
-     ```json
-     {
-       "activationEvents": [
-         "onCommand:extension.aggregateOpenTabs"
-       ]
-     }
+## Getting Started
+
+1. **Open the "Aggregate Open Tabs" Tree View**  
+   - By default, it appears in the Explorer sidebar (look for "**Aggregate Open Tabs**").  
+   - If you don’t see it, press `Ctrl+Shift+P` (or `Cmd+Shift+P` on macOS) and run:
      ```
-   - This means VS Code will load (activate) your extension when the user runs `extension.aggregateOpenTabs`.
-
-2. **Command Declaration**  
-   - In the `contributes` section of `package.json`, define the command:
-     ```json
-     {
-       "contributes": {
-         "commands": [
-           {
-             "command": "extension.aggregateOpenTabs",
-             "title": "Aggregate Open Tabs into One File"
-           }
-         ]
-       }
-     }
-     ```
-   - This will make “Aggregate Open Tabs into One File” appear in the Command Palette.
-
----
-
-## 4. Logic to Collect Text from Open Tabs
-
-1. **Retrieve Open Editors**  
-   - Use `vscode.window.visibleTextEditors` to get currently visible editors or `vscode.workspace.textDocuments` for all opened documents.  
-   - Example using visible editors:
-     ```ts
-     const openEditors = vscode.window.visibleTextEditors;
+     View: Show Aggregate Open Tabs
      ```
 
-2. **Fetch the File Content**  
-   - For each editor, access the document’s text:
-     ```ts
-     const documentText = editor.document.getText();
-     ```
-   - Also record the file name or path for clarity.
+2. **Aggregate Your Files**  
+   - In the Tree View, click “Aggregate # Open Files” to combine all open tabs into a single output.  
+   - Alternatively, click “Copy to Clipboard” to copy the aggregated content to your clipboard.
 
-3. **Combine All Contents**  
-   - Concatenate all open file contents into a single string:
-     ```ts
-     let aggregatedContent = "";
-     for (const editor of openEditors) {
-       const fileName = editor.document.fileName;
-       const fileContent = editor.document.getText();
-       aggregatedContent += `// File: ${fileName}\n${fileContent}\n\n`;
-     }
-     ```
+3. **Preview the Aggregation**  
+   - Click “Toggle Preview” in the Tree View to open the webview panel.  
+   - Any changes to open files will refresh the preview automatically (with a brief delay).
 
----
+4. **Selective Aggregation**  
+   - Run the command `Aggregate Selectively` (`extension.selectiveAggregate`) via the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`).  
+   - A Quick Pick menu will let you choose which files to include.
 
-## 5. Writing/Generating the Aggregated File
+## Commands
 
-1. **Decide Where to Place the File**  
-   - **Untitled (In-Memory) Document**: Creates a temporary buffer within VS Code.  
-   - **Physical File**: Writes to the workspace folder or a specified path on disk.
+| Command                               | Description                                                                                           |
+|---------------------------------------|-------------------------------------------------------------------------------------------------------|
+| **`extension.aggregateOpenTabs`**     | Aggregates content from all open files into one unified output.                                       |
+| **`extension.selectiveAggregate`**    | Prompts you to select which open files to aggregate.                                                  |
+| **`extension.togglePreview`**         | Toggles the webview preview panel for the aggregated output.                                          |
+| **`extension.copyAggregatedContent`** | Copies the aggregated content to your clipboard.                                                      |
+| **`extension.openConfiguration`**     | Opens the extension’s configuration panel in a dedicated webview (alternative to using VS Code’s Settings). |
 
-2. **Create a New Document**  
-   - For an untitled document in TypeScript:
-     ```ts
-     const doc = await vscode.workspace.openTextDocument({
-       content: aggregatedContent,
-       language: "plaintext"
-     });
-     ```
-   - Or write to disk using the FileSystem API or Node.js, then open the file.
+You can also access some of these commands from the **Aggregate Open Tabs** Tree View context menu.
 
----
+## Configuration
 
-## 6. Displaying the Aggregated File in a Split Editor
+All configuration settings can be found by opening **File** > **Preferences** > **Settings** (or `Ctrl+,`) and searching for **`aggregateOpenTabs`**.
 
-1. **Open the Document**  
-   - Use the VS Code API to show the new document in the editor:
-     ```ts
-     await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
-     ```
-   - `ViewColumn.Beside` opens it in a split view.
+### Settings Overview
 
-2. **Editor Customizations** (Optional)  
-   - Specify a language for syntax highlighting by changing the language ID.  
-   - Scroll or reveal certain sections as needed.
+| Setting Key                                     | Description                                                                                                                                                                           |
+|-------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `aggregateOpenTabs.showPreviewOnStartup`        | If `true`, automatically open the Preview panel when VS Code starts (default: `false`).                                                                                              |
+| `aggregateOpenTabs.includeFileTypes`            | List of file extensions (e.g. `[ ".ts", ".js" ]`). When not empty, only these file types are aggregated. Use `["*"]` to include all.                                                   |
+| `aggregateOpenTabs.chunkSize`                   | Maximum number of lines per chunk (default: `2000`). Files larger than this are split into multiple chunks.                                                                           |
+| `aggregateOpenTabs.excludePatterns`             | Array of glob patterns to exclude (e.g., `["**/node_modules/**", "**/.git/**"]`).                                                                                                     |
+| `aggregateOpenTabs.addSummaries`                | If `true`, adds short file summaries (default: `true`).                                                                                                                               |
+| `aggregateOpenTabs.enhancedSummaries`           | If `true`, uses AI-powered, detailed file analysis (default: `true`).                                                                                                                 |
+| `aggregateOpenTabs.extraSpacing`                | If `true`, adds extra spacing around code blocks and sections (default: `true`).                                                                                                      |
+| `aggregateOpenTabs.useCodeFences`               | If `true`, wraps code chunks in fenced blocks for Markdown/HTML (default: `true`).                                                                                                    |
+| `aggregateOpenTabs.aiSummaryStyle`              | Summaries can be `'concise'` or `'detailed'` (default: `concise`).                                                                                                                    |
+| `aggregateOpenTabs.includeKeyPoints`            | If `true`, includes bullet-point key findings for each file (default: `true`).                                                                                                        |
+| `aggregateOpenTabs.includeImports`              | If `true`, includes a list of imports for each file (default: `true`).                                                                                                                |
+| `aggregateOpenTabs.includeExports`              | If `true`, includes a list of exports for each file (default: `true`).                                                                                                                |
+| `aggregateOpenTabs.includeDependencies`         | If `true`, includes detected external package dependencies (default: `true`).                                                                                                         |
+| `aggregateOpenTabs.tailoredSummaries`           | If `true`, attempts to tailor the AI summary to each file’s content (default: `true`).                                                                                                |
+| `aggregateOpenTabs.outputFormat`                | Output format of the aggregated content (`plaintext`, `markdown`, or `html`). Default is `markdown`.                                                                                  |
+| `aggregateOpenTabs.chunkSeparatorStyle`         | Controls how chunks are separated (`double`, `single`, `minimal`). Default is `double`.                                                                                               |
+| `aggregateOpenTabs.codeFenceLanguageMap`        | Map of language IDs to code fence labels (e.g., `{ "typescript": "ts" }`).                                                                                                            |
+| `aggregateOpenTabs.sensitiveDataHandling`       | How to handle sensitive data (`warn`, `redact`, `skip`, or `ignore`). Default is `warn`.                                                                                              |
+| `aggregateOpenTabs.customRedactionPatterns`     | Array of regex patterns for additional sensitive data redaction (e.g., `["API_KEY_\\w+", "SECRET_\\w+"]`).                                                                            |
+| `aggregateOpenTabs.openInNewWindow`             | If `true`, aggregated content opens in a new VS Code window (default: `false`).                                                                                                       |
 
----
+### Configuration Panel
 
-## 7. User Flow
+For a more intuitive setup experience, you can open a dedicated **configuration UI**:
 
-1. **User Opens Multiple Tabs**  
-   - The user has several files open in VS Code.
-2. **User Triggers Command**  
-   - From the Command Palette, select “Aggregate Open Tabs into One File.”
-3. **Extension Gathers Content**  
-   - The extension looks at each open editor, extracts file content, and builds a single string.
-4. **Aggregated File is Shown**  
-   - A new editor pane (split if desired) is opened with the combined file.
-5. **User Copies or Processes the File**  
-   - The user can then copy all contents, or send it to an LLM or any other tool.
+1. Run the command:
 
----
+Aggregate Open Tabs: Open Configuration
 
-## 8. Edge Cases & Considerations
+2. A webview panel will appear with chunking, file exclusion, output settings, security, and other options.
 
-1. **Large Files or Many Tabs**  
-   - Be mindful of performance when concatenating very large documents.
-2. **Binary or Non-Text Files**  
-   - Decide whether to ignore binary files or handle them differently.
-3. **Untitled Editors**  
-   - Label them as “Untitled-X” or similar.  
-4. **Duplicate Tabs**  
-   - If the same file appears in multiple splits, do you want to include it once or multiple times?
-5. **Workspace Permissions**  
-   - If writing to disk, watch for permission issues.
+## Example Workflow
 
----
+1. **Open Multiple Files** in VS Code—various file types such as `.ts`, `.md`, `.json`, etc.
+2. **Check the Tree View** (Explorer sidebar):
+- View “File Statistics” for total size and language/workspace distribution.
+- Expand “Open Files” to see each open file with a short analysis.
+3. **Click “Aggregate # Open Files”**:
+- You’ll see a single aggregated document in the Preview or copied to your clipboard.
+4. **Use the Preview**:
+- Toggle the preview in the Tree View or run `extension.togglePreview`.
+- Automatic refresh when you change files.
+5. **Selective Aggregation**:
+- Run `extension.selectiveAggregate` from the Command Palette.
+- Uncheck unwanted files from the Quick Pick prompt.
 
-## 9. Testing & Validation
+## Security & Sensitive Data
 
-1. **Local Testing**  
-   - Use `npm run compile` or `npm run watch` (for TypeScript).  
-   - Press `F5` in VS Code to launch an Extension Development Host for testing.
-2. **Edge Cases**  
-   - Test no open editors.  
-   - Test large files.  
-   - Test multiple open tabs of the same file.
-3. **Output Verification**  
-   - Ensure the aggregated file content matches your expectations.
+- By default, the extension detects environment variables and other potential secrets.
+- Configure handling under **`aggregateOpenTabs.sensitiveDataHandling`**:
+- `warn`: Show a warning but still include them in aggregated content.
+- `redact`: Mask out sensitive values (e.g., `SECRET_KEY` → `REDACTED`).
+- `skip`: Skip lines or files containing sensitive data.
+- `ignore`: Do nothing special with sensitive data.
+- You can add your own **`customRedactionPatterns`** (as an array of regex patterns) to further refine redactions.
 
----
+## Contributing
 
-## 10. Publishing (Optional)
+1. **Fork** the repository.
+2. **Create** a new branch for your feature or bug fix.
+3. **Commit** and push your changes with tests (if applicable).
+4. **Open** a pull request, describing your modifications.
 
-1. **VS Code Marketplace**  
-   - Use `vsce package` to bundle your extension.  
-   - Use `vsce publish` to publish (requires a Microsoft account and an Azure DevOps organization).
-2. **Versioning**  
-   - Update the version in `package.json` (e.g., `1.0.0` -> `1.1.0` for minor changes).
+## License
+
+This project is licensed under the [MIT License](./LICENSE).  
+See the [LICENSE](./LICENSE) file for details.
 
 ---
 
-## 11. Summary of Requirements
+**Enjoy using Aggregate Open Tabs!** If you have questions, suggestions, or issues, please open a GitHub Issue or submit a PR.
 
-- **VS Code Extension** with one main command to aggregate open files.  
-- **Command**: `extension.aggregateOpenTabs`.  
-- **Activation**: Triggered by `onCommand:extension.aggregateOpenTabs`.  
-- **Implementation Steps**:
-  1. Create your project scaffold (`package.json`, `tsconfig.json`, etc.).  
-  2. Declare the extension command in `package.json`.  
-  3. In your command callback:
-     - Retrieve open tabs.  
-     - For each tab, get the document text.  
-     - Append text (with optional file headers) to a string buffer.  
-     - Create or open a new file with this aggregated content.  
-     - Show it in a split view (`ViewColumn.Beside`).  
-  4. Handle edge cases (no open editors, unsaved docs, duplicates).  
-  5. Test thoroughly and (optionally) publish to the VS Code Marketplace.
-
----
-
-**Happy coding!** Use this guide to implement the extension, and enjoy effortlessly collecting all open tabs into a single file for quick reference or AI processing.
+Happy coding!

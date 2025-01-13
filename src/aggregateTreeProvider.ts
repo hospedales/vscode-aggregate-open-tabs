@@ -36,14 +36,28 @@ export class AggregateTreeProvider implements
     readonly onDidChangeTreeData: vscode.Event<AggregateTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
     private fileOrder: string[] = [];
+    private selectedFiles: Set<string> = new Set();
+    private isSelective: boolean = false;
 
     // Implement drag and drop interface
     readonly dragMimeTypes = ['application/vnd.code.tree.aggregateOpenTabsView'];
     readonly dropMimeTypes = ['application/vnd.code.tree.aggregateOpenTabsView'];
 
     constructor() {
-        // Set up drag and drop
+        // Set up file change listener
         vscode.workspace.onDidChangeTextDocument(() => this.refresh());
+    }
+
+    public setSelectedFiles(files: vscode.TextDocument[], isSelective: boolean) {
+        this.selectedFiles = new Set(files.map(doc => doc.fileName));
+        this.isSelective = isSelective;
+        this.refresh();
+    }
+
+    public clearSelectedFiles() {
+        this.selectedFiles.clear();
+        this.isSelective = false;
+        this.refresh();
     }
 
     // Handle drag
@@ -94,7 +108,8 @@ export class AggregateTreeProvider implements
             !doc.isUntitled && 
             !doc.uri.scheme.startsWith('output') &&
             !doc.uri.scheme.startsWith('debug') &&
-            doc.uri.scheme === 'file'
+            doc.uri.scheme === 'file' &&
+            (!this.isSelective || this.selectedFiles.has(doc.fileName))
         );
 
         const stats: FileStats = {
