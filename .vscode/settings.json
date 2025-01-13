@@ -1,0 +1,23 @@
+{
+  "aggregateOpenTabs.outputFormat": "markdown",
+  "aggregateOpenTabs.useCodeFences": true,
+  "aggregateOpenTabs.extraSpacing": true,
+  "aggregateOpenTabs.enhancedSummaries": true,
+  "aggregateOpenTabs.chunkSeparatorStyle": "minimal",
+  "aggregateOpenTabs.codeFenceLanguageMap": {
+    "typescriptreact": "tsx",
+    "javascriptreact": "jsx",
+    "typescript": "ts",
+    "javascript": "js",
+    "markdown": "md",
+    "python": "python",
+    "rust": "rust",
+    "go": "go",
+    "html": "html",
+    "css": "css",
+    "scss": "scss",
+    "json": "json",
+    "yaml": "yaml",
+    "plaintext": "text"
+  }
+} 
