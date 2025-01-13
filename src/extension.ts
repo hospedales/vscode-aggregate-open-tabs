@@ -46,7 +46,17 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
         const outputFormat = config.get<string>('outputFormat', 'plaintext');
         const extraSpacing = config.get<boolean>('extraSpacing', true);
         const enhancedSummaries = config.get<boolean>('enhancedSummaries', true);
-        const includeAISummaries = config.get<boolean>('includeAISummaries', true);
+        const tailoredSummaries = config.get<boolean>('tailoredSummaries', true);
+        const includeKeyPoints = config.get<boolean>('includeKeyPoints', true);
+        const chunkSeparatorStyle = config.get<'double' | 'single' | 'minimal'>('chunkSeparatorStyle', 'double');
+        const codeFenceLanguageMap = config.get<Record<string, string>>('codeFenceLanguageMap', {
+            'typescriptreact': 'tsx',
+            'javascriptreact': 'jsx',
+            'typescript': 'ts',
+            'javascript': 'js',
+            'markdown': 'md',
+            'plaintext': 'text'
+        });
 
         // Get open documents
         let openFiles = vscode.workspace.textDocuments
@@ -66,52 +76,25 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
             openFiles = selectedDocs;
         }
 
-        // Process each document
+        // Process each document with enhanced analysis
         const fileMetadata = (await Promise.all(
             openFiles.map(async doc => {
                 try {
-                    const metadata = await getFileMetadata(doc.fileName, doc.getText(), doc.languageId);
+                    const metadata = getFileMetadata(doc.fileName, doc.getText(), doc.languageId);
                     
-                    // Check for sensitive data
-                    if (sensitiveDataHandling !== 'ignore') {
-                        const content = doc.getText();
-                        const sensitiveMatches = await detectSensitiveData(content);
-                        if (sensitiveMatches.length > 0) {
-                            switch (sensitiveDataHandling) {
-                                case 'warn':
-                                    const message = `Sensitive data detected in ${path.basename(doc.fileName)}. Proceed?`;
-                                    const proceed = await vscode.window.showWarningMessage(
-                                        message,
-                                        { modal: true },
-                                        'Yes',
-                                        'No'
-                                    );
-                                    if (proceed !== 'Yes') {
-                                        return null;
-                                    }
-                                    break;
-                                case 'redact':
-                                    metadata.content = await redactSensitiveData(content, sensitiveMatches);
-                                    break;
-                                case 'skip':
-                                    return null;
-                            }
-                        }
-                    }
-
-                    // Analyze file for enhanced summaries
+                    // Enhanced file analysis with tailored summaries
                     if (enhancedSummaries) {
-                        const analysis = await analyzeFile(doc);
-                        metadata.analysis = {
-                            ...analysis,
-                            aiSummary: includeAISummaries ? analysis.aiSummary : undefined,
-                            keyPoints: includeAISummaries ? analysis.keyPoints : undefined
-                        };
+                        const analysis = await analyzeFile(doc, {
+                            tailored: tailoredSummaries,
+                            includeKeyPoints,
+                            languageMap: codeFenceLanguageMap
+                        });
+                        metadata.analysis = analysis;
                     }
-
+                    
                     return metadata;
                 } catch (error) {
-                    vscode.window.showErrorMessage(`Error processing ${doc.fileName}: ${error instanceof Error ? error.message : String(error)}`);
+                    console.error(`Error processing ${doc.fileName}:`, error);
                     return null;
                 }
             })
@@ -122,11 +105,15 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
             return;
         }
 
-        // Create formatter and generate content
+        // Create formatter with enhanced options
         const formatter = createFormatter(outputFormat, { 
             extraSpacing, 
-            enhancedSummaries, 
-            chunkSize 
+            enhancedSummaries,
+            chunkSize,
+            chunkSeparatorStyle,
+            codeFenceLanguageMap,
+            tailoredSummaries,
+            includeKeyPoints
         });
         const content = await formatter.format(fileMetadata);
 

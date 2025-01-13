@@ -5,6 +5,15 @@ export interface FormatOptions {
     extraSpacing: boolean;
     enhancedSummaries: boolean;
     chunkSize: number;
+    chunkSeparatorStyle: 'double' | 'single' | 'minimal';
+    codeFenceLanguageMap?: Record<string, string>;
+    tailoredSummaries?: boolean;
+    includeKeyPoints?: boolean;
+    includeImports?: boolean;
+    includeExports?: boolean;
+    includeDependencies?: boolean;
+    aiSummaryStyle?: 'concise' | 'detailed';
+    includeAiSummaries?: boolean;
 }
 
 abstract class BaseFormatter {
@@ -59,6 +68,32 @@ abstract class BaseFormatter {
         }
 
         return chunks;
+    }
+
+    protected getSeparator(style: 'double' | 'single' | 'minimal' = 'double'): string {
+        switch (style) {
+            case 'double':
+                return '=============================================================================';
+            case 'single':
+                return '-----------------------------------------------------------------------------';
+            case 'minimal':
+                return '------------------';
+            default:
+                return '=============================================================================';
+        }
+    }
+
+    protected getChunkSeparator(style: 'double' | 'single' | 'minimal' = 'double'): string {
+        switch (style) {
+            case 'double':
+                return '-----------------------------------------------------------------------------';
+            case 'single':
+                return '- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -';
+            case 'minimal':
+                return '------------------';
+            default:
+                return '-----------------------------------------------------------------------------';
+        }
     }
 
     async format(files: FileMetadata[]): Promise<string> {
@@ -146,11 +181,12 @@ export class PlainTextFormatter extends BaseFormatter {
     protected generateFileHeader(metadata: FileMetadata): string {
         const relativePath = this.getRelativePath(metadata);
         const langInfo = this.getLanguageSpecificInfo(metadata);
+        const separator = this.getSeparator(this.options.chunkSeparatorStyle);
         
         const lines = [
-            '//=============================================================================',
+            `\n//${separator}`,
             `// File: ${relativePath}${metadata.chunkInfo || ''}`,
-            '//=============================================================================',
+            `//${separator}`,
             '',
             '// File Metadata',
             '// -------------',
@@ -193,14 +229,15 @@ export class PlainTextFormatter extends BaseFormatter {
         }
 
         lines.push('',
-            '//=============================================================================',
+            `//${separator}`,
             '');
         
         return lines.join('\n');
     }
 
     protected generateFileFooter(_metadata: FileMetadata): string {
-        return '\n//=============================================================================\n';
+        const separator = this.getSeparator(this.options.chunkSeparatorStyle);
+        return `\n//${separator}\n\n`;
     }
 
     protected wrapContent(content: string, metadata: FileMetadata): string {
@@ -213,15 +250,17 @@ export class PlainTextFormatter extends BaseFormatter {
             return content;
         }
 
-        // If content is chunked, add chunk headers
+        // If content is chunked, add chunk headers with improved spacing
         const lines: string[] = [];
+        const chunkSeparator = this.getChunkSeparator(this.options.chunkSeparatorStyle);
+        
         chunks.forEach((chunk, index) => {
             const start = index * this.options.chunkSize + 1;
             const end = Math.min(start + chunk.split('\n').length - 1, metadata.content.split('\n').length);
             
-            lines.push(`//-----------------------------------------------------------------------------`,
+            lines.push(`//${chunkSeparator}`,
                 `// Chunk ${index + 1}: Lines ${start}-${end}`,
-                `//-----------------------------------------------------------------------------\n`);
+                `//${chunkSeparator}\n`);
             lines.push(chunk);
             if (index < chunks.length - 1) {
                 lines.push('\n');
@@ -346,8 +385,17 @@ export class MarkdownFormatter extends BaseFormatter {
             lines.push('\n</details>\n');
         }
 
-        // Add code block header
-        lines.push(`\`\`\`${metadata.languageId}`);
+        // Add code block header with proper language identifier
+        const languageMap: { [key: string]: string } = {
+            'typescriptreact': 'tsx',
+            'javascriptreact': 'jsx',
+            'typescript': 'ts',
+            'javascript': 'js',
+            'markdown': 'md',
+            'plaintext': 'text'
+        };
+        const langId = languageMap[metadata.languageId] || metadata.languageId;
+        lines.push(`\`\`\`${langId}`);
         
         return lines.join('\n');
     }
@@ -366,14 +414,25 @@ export class MarkdownFormatter extends BaseFormatter {
             return content;
         }
 
-        // If content is chunked, wrap each chunk in a collapsible section
+        // If content is chunked, wrap each chunk in a collapsible section with proper code fencing
         const lines: string[] = [];
         chunks.forEach((chunk, index) => {
             const start = index * this.options.chunkSize + 1;
             const end = Math.min(start + chunk.split('\n').length - 1, metadata.content.split('\n').length);
             
             lines.push(`<details${index === 0 ? ' open' : ''}><summary>Chunk ${index + 1}: Lines ${start}-${end}</summary>\n`);
-            lines.push(`\`\`\`${metadata.languageId}`);
+            
+            // Add proper language identifier for the code block
+            const languageMap: { [key: string]: string } = {
+                'typescriptreact': 'tsx',
+                'javascriptreact': 'jsx',
+                'typescript': 'ts',
+                'javascript': 'js',
+                'markdown': 'md',
+                'plaintext': 'text'
+            };
+            const langId = languageMap[metadata.languageId] || metadata.languageId;
+            lines.push(`\`\`\`${langId}`);
             lines.push(chunk);
             lines.push('```\n</details>\n');
         });
@@ -384,26 +443,83 @@ export class MarkdownFormatter extends BaseFormatter {
 
 export class HtmlFormatter extends BaseFormatter {
     protected generateTableOfContents(files: FileMetadata[]): string {
-        const lines = ['<h1>Table of Contents</h1>', '<ul>'];
+        const lines = ['<h1>Table of Contents</h1>', '<div class="toc">'];
+        let currentDir = '';
         
         for (const file of files) {
             const relativePath = this.getRelativePath(file);
-            const langInfo = this.getLanguageSpecificInfo(file);
-            lines.push(`<li><code>${relativePath}</code>${langInfo ? ` (${langInfo})` : ''}`);
+            const dir = path.dirname(relativePath);
             
-            if (this.options.enhancedSummaries && file.analysis?.purpose) {
-                lines.push('<ul>');
-                lines.push(`<li>Purpose: ${file.analysis.purpose}</li>`);
-                if (file.analysis.exports.length > 0) {
-                    lines.push(`<li>Exports: ${file.analysis.exports.join(', ')}</li>`);
+            // Start a new directory section if needed
+            if (dir !== currentDir) {
+                if (currentDir !== '') {
+                    lines.push('</div>'); // Close previous directory
                 }
-                lines.push('</ul>');
+                if (dir !== '.') {
+                    lines.push(`<div class="directory"><h3>📁 ${dir}/</h3>`);
+                }
+                currentDir = dir;
             }
             
-            lines.push('</li>');
+            const fileName = path.basename(relativePath);
+            const langInfo = this.getLanguageSpecificInfo(file);
+            
+            lines.push('<div class="file-entry">');
+            lines.push(`<code>${fileName}</code>${langInfo ? ` <span class="lang-info">(${langInfo})</span>` : ''}`);
+            
+            if (this.options.enhancedSummaries && file.analysis) {
+                if (file.analysis.purpose || file.analysis.frameworks?.length) {
+                    lines.push('<div class="file-meta">');
+                    if (file.analysis.purpose) {
+                        lines.push(`<div class="purpose">${file.analysis.purpose}</div>`);
+                    }
+                    if (file.analysis.frameworks?.length) {
+                        lines.push(`<div class="frameworks">Uses: ${file.analysis.frameworks.join(', ')}</div>`);
+                    }
+                    lines.push('</div>');
+                }
+                
+                if (file.analysis.aiSummary) {
+                    lines.push(`<div class="ai-summary">${file.analysis.aiSummary}</div>`);
+                }
+                
+                if (file.analysis.keyPoints?.length) {
+                    lines.push('<details class="key-points">');
+                    lines.push('<summary>Key Points</summary>');
+                    lines.push('<ul>');
+                    file.analysis.keyPoints.forEach(point => {
+                        lines.push(`<li>${point}</li>`);
+                    });
+                    lines.push('</ul>');
+                    lines.push('</details>');
+                }
+            }
+            
+            lines.push('</div>');
         }
         
-        lines.push('</ul>');
+        // Close any open directory
+        if (currentDir !== '.') {
+            lines.push('</div>');
+        }
+        
+        lines.push('</div>'); // Close toc
+        
+        // Add CSS styles
+        lines.push('<style>');
+        lines.push('.toc { margin: 1em 0; }');
+        lines.push('.directory { margin: 1em 0; padding-left: 1em; }');
+        lines.push('.file-entry { margin: 0.5em 0; padding-left: 1em; }');
+        lines.push('.lang-info { color: #666; font-size: 0.9em; }');
+        lines.push('.file-meta { margin: 0.3em 0; color: #444; font-size: 0.9em; }');
+        lines.push('.purpose { font-style: italic; }');
+        lines.push('.frameworks { color: #0066cc; }');
+        lines.push('.ai-summary { margin: 0.3em 0; color: #555; }');
+        lines.push('.key-points { margin: 0.5em 0; }');
+        lines.push('.key-points summary { cursor: pointer; color: #333; }');
+        lines.push('.key-points ul { margin: 0.5em 0; padding-left: 2em; }');
+        lines.push('</style>');
+        
         return lines.join('\n') + '\n';
     }
 
@@ -411,24 +527,88 @@ export class HtmlFormatter extends BaseFormatter {
         const relativePath = this.getRelativePath(metadata);
         const langInfo = this.getLanguageSpecificInfo(metadata);
         
-        return [
-            `<h2>${relativePath}${metadata.chunkInfo || ''}</h2>`,
+        const lines = [
+            `<div class="file-section">`,
+            `<h2 class="file-title">${relativePath}${metadata.chunkInfo || ''}</h2>`,
+            '<div class="file-metadata">',
             '<table>',
             '<tr><th>Property</th><th>Value</th></tr>',
             `<tr><td>Language</td><td>${metadata.languageId}${langInfo ? ` (${langInfo})` : ''}</td></tr>`,
             `<tr><td>Size</td><td>${metadata.size} bytes</td></tr>`,
-            `<tr><td>Last Modified</td><td>${metadata.lastModified}</td></tr>`,
-            metadata.analysis?.purpose ? `<tr><td>Purpose</td><td>${metadata.analysis.purpose}</td></tr>` : '',
-            '</table>\n'
-        ].filter(Boolean).join('\n');
+            `<tr><td>Last Modified</td><td>${metadata.lastModified}</td></tr>`
+        ];
+
+        if (metadata.analysis) {
+            if (metadata.analysis.purpose) {
+                lines.push(`<tr><td>Purpose</td><td>${metadata.analysis.purpose}</td></tr>`);
+            }
+            if (metadata.analysis.frameworks?.length) {
+                lines.push(`<tr><td>Frameworks</td><td>${metadata.analysis.frameworks.join(', ')}</td></tr>`);
+            }
+            if (metadata.analysis.dependencies?.length) {
+                lines.push(`<tr><td>Dependencies</td><td>${metadata.analysis.dependencies.join(', ')}</td></tr>`);
+            }
+            if (metadata.analysis.imports?.length) {
+                lines.push(`<tr><td>Imports</td><td>${metadata.analysis.imports.join(', ')}</td></tr>`);
+            }
+            if (metadata.analysis.exports?.length) {
+                lines.push(`<tr><td>Exports</td><td>${metadata.analysis.exports.join(', ')}</td></tr>`);
+            }
+        }
+        lines.push('</table>');
+
+        // Add AI Analysis in a collapsible section
+        if (metadata.analysis?.aiSummary || metadata.analysis?.keyPoints?.length) {
+            lines.push('<details class="ai-analysis">');
+            lines.push('<summary>AI Analysis</summary>');
+            lines.push('<div class="analysis-content">');
+            
+            if (metadata.analysis.aiSummary) {
+                lines.push(`<div class="ai-summary"><strong>Summary:</strong> ${metadata.analysis.aiSummary}</div>`);
+            }
+            
+            if (metadata.analysis.keyPoints?.length) {
+                lines.push('<div class="key-points">');
+                lines.push('<strong>Key Points:</strong>');
+                lines.push('<ul>');
+                metadata.analysis.keyPoints.forEach(point => {
+                    lines.push(`<li>${point}</li>`);
+                });
+                lines.push('</ul>');
+                lines.push('</div>');
+            }
+            
+            lines.push('</div>');
+            lines.push('</details>');
+        }
+
+        lines.push('</div>'); // Close file-metadata
+
+        // Add CSS styles
+        lines.push('<style>');
+        lines.push('.file-section { margin: 2em 0; }');
+        lines.push('.file-title { color: #333; border-bottom: 2px solid #eee; padding-bottom: 0.5em; }');
+        lines.push('.file-metadata { margin: 1em 0; }');
+        lines.push('.file-metadata table { border-collapse: collapse; width: 100%; }');
+        lines.push('.file-metadata th, .file-metadata td { padding: 0.5em; text-align: left; border: 1px solid #ddd; }');
+        lines.push('.file-metadata th { background: #f5f5f5; }');
+        lines.push('.ai-analysis { margin: 1em 0; }');
+        lines.push('.ai-analysis summary { cursor: pointer; padding: 0.5em; background: #f5f5f5; }');
+        lines.push('.analysis-content { padding: 1em; border: 1px solid #ddd; border-top: none; }');
+        lines.push('.ai-summary { margin-bottom: 1em; }');
+        lines.push('.key-points ul { margin: 0.5em 0; padding-left: 2em; }');
+        lines.push('</style>');
+
+        return lines.join('\n') + '\n';
     }
 
     protected generateFileFooter(_metadata: FileMetadata): string {
-        return '\n<hr>\n';
+        return '</div>\n<hr>\n';
     }
 
     protected wrapContent(content: string, metadata: FileMetadata): string {
-        return `<pre><code class="language-${metadata.languageId}">${this.escapeHtml(content)}</code></pre>`;
+        const languageClass = metadata.languageId ? ` class="language-${metadata.languageId}"` : '';
+        return `<div class="code-block"><pre><code${languageClass}>${this.escapeHtml(content)}</code></pre></div>`;
     }
 
     private escapeHtml(text: string): string {

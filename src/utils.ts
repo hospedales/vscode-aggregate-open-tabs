@@ -42,6 +42,9 @@ export interface FormatOptions {
     includeImports?: boolean;
     includeExports?: boolean;
     includeDependencies?: boolean;
+    chunkSeparatorStyle?: 'double' | 'single' | 'minimal';
+    codeFenceLanguageMap?: Record<string, string>;
+    tailoredSummaries?: boolean;
 }
 
 export function getFileMetadata(filePath: string, content: string, languageId: string): FileMetadata {

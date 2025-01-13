@@ -1,6 +1,15 @@
 import * as vscode from 'vscode';
 
-export async function analyzeFile(document: vscode.TextDocument): Promise<{
+export interface AnalyzeOptions {
+    tailored?: boolean;
+    includeKeyPoints?: boolean;
+    languageMap?: Record<string, string>;
+}
+
+export async function analyzeFile(
+    document: vscode.TextDocument,
+    options: AnalyzeOptions = {}
+): Promise<{
     frameworks: string[];
     purpose: string;
     dependencies: string[];
@@ -246,49 +255,125 @@ export function generateAISummary(content: string, languageId: string): { aiSumm
     // Detect file purpose based on patterns
     const purposes: string[] = [];
     
+    // Enhanced React/Next.js detection
     if (languageId === 'typescriptreact' || languageId === 'javascriptreact') {
-        if (content.includes('use client')) purposes.push('Client Component');
-        if (!content.includes('use client')) purposes.push('Server Component');
-        if (content.includes('createContext')) purposes.push('Context Provider');
-        if (content.includes('useContext')) purposes.push('Context Consumer');
+        if (content.includes('use client')) {
+            purposes.push('Interactive Client Component');
+        } else {
+            purposes.push('Server-Rendered Component');
+        }
+        
+        // Component type detection
+        if (content.includes('createContext')) purposes.push('with Context Management');
+        if (content.includes('useContext')) purposes.push('using Context');
         if (/layout\.[tj]sx?$/.test(firstNonEmptyLine)) purposes.push('Layout Component');
         if (/page\.[tj]sx?$/.test(firstNonEmptyLine)) purposes.push('Page Component');
+        if (content.includes('loading')) purposes.push('Loading State Handler');
+        if (content.includes('error')) purposes.push('Error Boundary');
     }
     
-    if (content.includes('@api') || content.includes('api/')) purposes.push('API Route');
-    if (content.includes('test(') || content.includes('describe(')) purposes.push('Test File');
-    if (content.includes('middleware')) purposes.push('Middleware');
-    if (content.includes('type ') || content.includes('interface ')) purposes.push('Type Definitions');
+    // Enhanced API detection
+    if (content.includes('@api') || content.includes('api/')) {
+        purposes.push('API Route');
+        if (content.includes('GET')) purposes.push('handling GET requests');
+        if (content.includes('POST')) purposes.push('handling POST requests');
+        if (content.includes('PUT')) purposes.push('handling PUT requests');
+        if (content.includes('DELETE')) purposes.push('handling DELETE requests');
+    }
+
+    // Enhanced testing detection
+    if (content.includes('test(') || content.includes('describe(')) {
+        purposes.push('Test Suite');
+        if (content.includes('integration')) purposes.push('for Integration Tests');
+        if (content.includes('unit')) purposes.push('for Unit Tests');
+        if (content.includes('e2e')) purposes.push('for E2E Tests');
+    }
+
+    // Enhanced type detection
+    if (content.includes('type ') || content.includes('interface ')) {
+        purposes.push('Type Definitions');
+        if (content.includes('extends')) purposes.push('with Type Extensions');
+        if (content.includes('implements')) purposes.push('with Interface Implementations');
+    }
     
-    // Generate key points
+    // Generate detailed key points
     const keyPoints: string[] = [];
     
-    // Check for important patterns
-    if (content.includes('fetch(')) keyPoints.push('Makes API calls');
-    if (content.includes('useEffect')) keyPoints.push('Has side effects');
-    if (content.includes('useState')) keyPoints.push('Manages local state');
-    if (content.includes('createClient')) keyPoints.push('Creates database client');
-    if (content.includes('env.')) keyPoints.push('Uses environment variables');
-    if (content.includes('throw new Error')) keyPoints.push('Has error handling');
-    if (content.includes('try {')) keyPoints.push('Uses try-catch blocks');
-    if (content.includes('async')) keyPoints.push('Contains asynchronous operations');
-    if (content.includes('export type') || content.includes('export interface')) keyPoints.push('Exports type definitions');
-    if (content.includes('import type')) keyPoints.push('Imports type definitions');
-    if (content.includes('extends ')) keyPoints.push('Uses inheritance/type extensions');
-    if (content.includes('implements ')) keyPoints.push('Implements interfaces');
-    if (content.includes('private ') || content.includes('protected ')) keyPoints.push('Uses access modifiers');
-    if (content.includes('static ')) keyPoints.push('Contains static members');
-    if (content.includes('readonly ')) keyPoints.push('Uses readonly properties');
-    if (content.includes('as const')) keyPoints.push('Uses const assertions');
-    if (content.includes('satisfies ')) keyPoints.push('Uses type satisfaction');
+    // State management
+    if (content.includes('useState')) {
+        const stateVars = content.match(/useState[<(][^>)]*[>)]?\([^)]*\)/g) || [];
+        keyPoints.push(`Manages ${stateVars.length} state variable${stateVars.length !== 1 ? 's' : ''}`);
+    }
+
+    // Effect handling
+    if (content.includes('useEffect')) {
+        const effects = content.match(/useEffect\(/g) || [];
+        keyPoints.push(`Has ${effects.length} side effect${effects.length !== 1 ? 's' : ''}`);
+    }
+
+    // API and data fetching
+    if (content.includes('fetch(') || content.includes('axios')) {
+        const fetchCalls = (content.match(/fetch\(/g) || []).length;
+        const axiosCalls = (content.match(/axios\./g) || []).length;
+        keyPoints.push(`Makes ${fetchCalls + axiosCalls} API call${fetchCalls + axiosCalls !== 1 ? 's' : ''}`);
+    }
+
+    // Database operations
+    if (content.includes('createClient') || content.includes('prisma') || content.includes('supabase')) {
+        keyPoints.push('Performs database operations');
+        if (content.includes('select')) keyPoints.push('- Queries data');
+        if (content.includes('insert')) keyPoints.push('- Inserts records');
+        if (content.includes('update')) keyPoints.push('- Updates records');
+        if (content.includes('delete')) keyPoints.push('- Deletes records');
+    }
+
+    // Security and environment
+    if (content.includes('env.')) keyPoints.push('Uses environment variables for configuration');
+    if (content.includes('auth') || content.includes('session')) keyPoints.push('Implements authentication/authorization');
+
+    // Error handling
+    if (content.includes('try {')) {
+        const tryCatches = (content.match(/try\s*{/g) || []).length;
+        keyPoints.push(`Contains ${tryCatches} error handling block${tryCatches !== 1 ? 's' : ''}`);
+    }
+
+    // TypeScript features
+    if (content.includes('export type') || content.includes('export interface')) {
+        const typeExports = (content.match(/export\s+(type|interface)/g) || []).length;
+        keyPoints.push(`Exports ${typeExports} type definition${typeExports !== 1 ? 's' : ''}`);
+    }
+
+    // Performance optimizations
+    if (content.includes('useMemo') || content.includes('useCallback')) {
+        const memos = (content.match(/useMemo\(/g) || []).length;
+        const callbacks = (content.match(/useCallback\(/g) || []).length;
+        keyPoints.push(`Uses ${memos + callbacks} performance optimization${memos + callbacks !== 1 ? 's' : ''}`);
+    }
+
+    // UI/UX features
+    if (content.includes('className=')) {
+        if (content.includes('dark:')) keyPoints.push('Implements dark mode support');
+        if (content.includes('md:') || content.includes('lg:')) keyPoints.push('Has responsive design');
+        if (content.includes('animate-') || content.includes('transition-')) keyPoints.push('Includes animations');
+    }
     
-    // Generate a concise summary
-    const summary = purposes.length > 0 
-        ? `${purposes.join(' and ')} that ${keyPoints.length > 0 ? keyPoints.join(', ').toLowerCase() : 'provides core functionality'}`
-        : `Utility file that ${keyPoints.length > 0 ? keyPoints.join(', ').toLowerCase() : 'provides helper functions'}`;
+    // Generate a detailed summary
+    let summary = purposes.length > 0 
+        ? purposes.join(' ')
+        : 'Utility file';
+
+    // Add key functionality to summary
+    const keyFunctionality = keyPoints
+        .filter(point => !point.startsWith('-')) // Filter out sub-points
+        .map(point => point.toLowerCase())
+        .join(', ');
+
+    if (keyFunctionality) {
+        summary += ` that ${keyFunctionality}`;
+    }
     
     return {
         aiSummary: summary,
-        keyPoints
+        keyPoints: keyPoints.filter(point => point.trim().length > 0) // Remove empty points
     };
 } 
