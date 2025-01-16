@@ -1103,6 +1103,9 @@ def aggregate_files(
     cache_file = root_path / ".aggregator_cache"
     change_tracker = ChangeTracker(cache_file) if track_changes else None
     
+    # Initialize GitIgnoreFilter
+    git_ignore_filter = GitIgnoreFilter(root_path)
+    
     # Initialize formatters
     if output_format == "html":
         formatter_class = HTMLFormatter
@@ -1117,7 +1120,7 @@ def aggregate_files(
     files: List[FileMetadata] = []
     for file_path in root_path.rglob('*'):
         if (file_path.is_file() and
-            not should_ignore_file(file_path) and
+            not should_ignore_file(file_path, git_ignore_filter) and
             not any(p in str(file_path) for p in exclude_patterns) and
             file_path.stat().st_size <= max_file_size and
             is_text_file(file_path)):
