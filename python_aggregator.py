@@ -85,8 +85,8 @@ class GitIgnoreFilter:
                         # Handle directory names without slashes
                         if '/' not in pattern and not pattern.startswith('*'):
                             # Match both the directory and its contents
-                            patterns.append(f"**/{pattern}/**")
-                            patterns.append(f"**/{pattern}")
+                            patterns.append(f"{pattern}/**")
+                            patterns.append(f"{pattern}")
                         else:
                             # If pattern doesn't start with * or /, make it match anywhere in path
                             if not pattern.startswith(('*', '/')):
