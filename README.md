@@ -32,15 +32,27 @@
   - Detect or redact sensitive data using configurable patterns or environment variables.
 
 - **Configurable Output**  
-  - Output can be formatted as **Markdown**, **Plain Text**, or **HTML**.  
-  - Control chunk separation style, code fence languages, extra spacing, and more.
+  - Output can be formatted as **Markdown**, **Plain Text**, or **HTML**  
+  - Control chunk separation style, code fence languages, extra spacing, and more
+  - **NEW**: Five customizable summary depths (minimal, basic, standard, detailed, comprehensive)
+  - **NEW**: Preset configurations for different use cases (development, documentation, etc.)
 
 - **Preview Panel**  
-  - View the aggregated result in real time in a separate webview.  
-  - Automatically refreshes when files are edited.
+  - View the aggregated result in real time in a separate webview
+  - Automatically refreshes when files are edited
+  - **NEW**: Split view with source and preview
+  - **NEW**: Real-time search with match highlighting
+  - **NEW**: Collapsible sections with smooth animations
+  - **NEW**: Syntax highlighting for code blocks
 
 - **Selective Aggregation**  
-  - Quickly pick and choose which files to include via a Quick Pick interface.
+  - Quickly pick and choose which files to include via a Quick Pick interface
+
+- **Cross-References & Tags**
+  - Track relationships between files with import/export analysis
+  - Apply custom tags with colors and descriptions
+  - Tag inheritance for directories
+  - Visual representation in preview
 
 ## Installation
 
@@ -113,12 +125,12 @@ All configuration settings can be found by opening **File** > **Preferences** > 
 | `aggregateOpenTabs.enhancedSummaries`           | If `true`, uses AI-powered, detailed file analysis (default: `true`).                                                                                                                 |
 | `aggregateOpenTabs.extraSpacing`                | If `true`, adds extra spacing around code blocks and sections (default: `true`).                                                                                                      |
 | `aggregateOpenTabs.useCodeFences`               | If `true`, wraps code chunks in fenced blocks for Markdown/HTML (default: `true`).                                                                                                    |
-| `aggregateOpenTabs.aiSummaryStyle`              | Summaries can be `'concise'` or `'detailed'` (default: `concise`).                                                                                                                    |
+| `aggregateOpenTabs.aiSummaryStyle`              | Summary depth level: `'minimal'`, `'basic'`, `'standard'`, `'detailed'`, or `'comprehensive'` (default: `standard`).                                                                   |
 | `aggregateOpenTabs.includeKeyPoints`            | If `true`, includes bullet-point key findings for each file (default: `true`).                                                                                                        |
 | `aggregateOpenTabs.includeImports`              | If `true`, includes a list of imports for each file (default: `true`).                                                                                                                |
 | `aggregateOpenTabs.includeExports`              | If `true`, includes a list of exports for each file (default: `true`).                                                                                                                |
 | `aggregateOpenTabs.includeDependencies`         | If `true`, includes detected external package dependencies (default: `true`).                                                                                                         |
-| `aggregateOpenTabs.tailoredSummaries`           | If `true`, attempts to tailor the AI summary to each file’s content (default: `true`).                                                                                                |
+| `aggregateOpenTabs.tailoredSummaries`           | If `true`, attempts to tailor the AI summary to each file's content (default: `true`).                                                                                                |
 | `aggregateOpenTabs.outputFormat`                | Output format of the aggregated content (`plaintext`, `markdown`, or `html`). Default is `markdown`.                                                                                  |
 | `aggregateOpenTabs.chunkSeparatorStyle`         | Controls how chunks are separated (`double`, `single`, `minimal`). Default is `double`.                                                                                               |
 | `aggregateOpenTabs.codeFenceLanguageMap`        | Map of language IDs to code fence labels (e.g., `{ "typescript": "ts" }`).                                                                                                            |
@@ -130,6 +142,10 @@ All configuration settings can be found by opening **File** > **Preferences** > 
 | `aggregateOpenTabs.dependencyTracking`         | If `true`, tracks and displays file dependencies (default: `true`).                                                                                                                    |
 | `aggregateOpenTabs.directoryContext`           | If `true`, includes directory-level context and relationships (default: `true`).                                                                                                       |
 | `aggregateOpenTabs.yamlMetadata`              | If `true`, formats metadata in YAML blocks for easier parsing (default: `true`).                                                                                                       |
+| `aggregateOpenTabs.previewSplitView`          | If `true`, enables split view in preview panel with source and preview panes (default: `true`).                                                                                        |
+| `aggregateOpenTabs.previewAutoRefresh`        | If `true`, preview updates automatically when files change (default: `true`).                                                                                                          |
+| `aggregateOpenTabs.previewSyntaxHighlight`    | If `true`, enables syntax highlighting in preview (default: `true`).                                                                                                                   |
+| `aggregateOpenTabs.previewCollapsibleSections`| If `true`, enables collapsible sections in preview (default: `true`).                                                                                                                 |
 
 ### Configuration Panel
 
@@ -191,13 +207,84 @@ path: src/main.ts
 language: typescript
 size: 2048 bytes
 last_modified: 2025-01-16T00:00:00Z
+summary_depth: comprehensive
 ```
+
+### Cross References
+<details>
+<summary>References and Dependencies</summary>
+
+**References:**
+- → `./utils.ts` (importUtils) - Line 12
+  - Context: Imports utility functions for file handling
+- → `./treeView.ts` (TreeProvider) - Line 15
+  - Context: Imports tree view provider for file visualization
+
+**Referenced By:**
+- ← `extension.ts` (activate) - Line 25
+  - Context: Main extension entry point
+</details>
 
 ### Source Code
 ```typescript
 // File contents here...
 ```
 ```
+
+## Summary Depth Levels
+
+The extension now supports five levels of detail for file analysis:
+
+1. **Minimal**: Basic file information and core purpose
+2. **Basic**: Adds frameworks and up to 2 key features
+3. **Standard**: Includes dependencies and up to 5 key points
+4. **Detailed**: Adds imports/exports, cross-references, and up to 10 key points
+5. **Comprehensive**: Shows all available information with additional context
+
+## Enhanced Preview Panel
+
+The preview panel has been significantly improved with:
+
+1. **Split View**
+   - Side-by-side view of source and preview
+   - Resizable split panes
+   - Synchronized scrolling
+
+2. **Real-time Updates**
+   - Auto-refresh with file changes
+   - Debounced updates for performance
+   - Progress indicators for long operations
+
+3. **Search & Navigation**
+   - Real-time search with match highlighting
+   - Match count indicators
+   - Jump to definition support
+
+4. **Visual Enhancements**
+   - Syntax highlighting for code blocks
+   - Collapsible sections with animations
+   - Native VSCode styling
+
+## Improved Configuration UI
+
+A new visual configuration panel provides:
+
+1. **Split Layout**
+   - Settings panel on the left
+   - Live preview on the right
+
+2. **Preset Configurations**
+   - Minimal: Basic file information only
+   - Standard: Balanced set of features
+   - Detailed: Comprehensive analysis
+   - Development: Optimized for development workflow
+   - Documentation: Optimized for documentation generation
+
+3. **Enhanced UX**
+   - Real-time settings preview
+   - Import/export functionality
+   - Improved pattern management
+   - Native VSCode styling
 
 ## Security & Sensitive Data
 
