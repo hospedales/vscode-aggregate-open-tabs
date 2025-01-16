@@ -425,5 +425,161 @@ def test_gitignore_filter(tmp_path):
     assert filter.should_ignore(tmp_path / "ignored_file.txt")
     assert not filter.should_ignore(tmp_path / "file.txt")
 
+def test_blank_line_offset_handling(tmp_path):
+    """Test that line numbers are correctly adjusted for blank lines."""
+    file_path = tmp_path / "test_file.py"
+    content = "\n\n\n\ndef function1():\n    pass\n\n\n\ndef function2():\n    pass"
+    file_path.write_text(content)
+    
+    metadata = get_file_metadata(file_path, tmp_path)
+    
+    # Check that line numbers in analysis are adjusted
+    assert "function1 (Lines 1-2)" in metadata.file_analysis  # Should be adjusted from actual line 5-6
+    assert "function2 (Lines 4-5)" in metadata.file_analysis  # Should be adjusted from actual line 10-11
+
+def test_nested_function_detection(tmp_path):
+    """Test that nested functions are properly detected and labeled."""
+    file_path = tmp_path / "test_file.py"
+    content = """
+def outer_function():
+    def inner_function1():
+        pass
+    def inner_function2():
+        pass
+    inner_function1()
+"""
+    file_path.write_text(content)
+    
+    metadata = get_file_metadata(file_path, tmp_path)
+    
+    # Check that nested functions are properly labeled
+    assert "outer_function -> inner_function1" in metadata.file_analysis
+    assert "outer_function -> inner_function2" in metadata.file_analysis
+
+def test_automatic_fallback_summary(tmp_path):
+    """Test that files without docstrings get automatic summaries."""
+    # File without docstrings
+    file1_path = tmp_path / "no_docstring.py"
+    content1 = """
+def utility_function():
+    pass
+
+class HelperClass:
+    pass
+"""
+    file1_path.write_text(content1)
+    
+    # File with docstrings
+    file2_path = tmp_path / "with_docstring.py"
+    content2 = '''"""This is a documented module."""\n''' + content1
+    file2_path.write_text(content2)
+    
+    metadata1 = get_file_metadata(file1_path, tmp_path)
+    metadata2 = get_file_metadata(file2_path, tmp_path)
+    
+    # No docstring file should have an auto-generated purpose
+    assert "utility functions" in metadata1.purpose.lower()
+    # Docstring file should use its docstring
+    assert "documented module" in metadata2.purpose.lower()
+
+def test_complex_type_glossary(tmp_path):
+    """Test that complex types and decorators are properly captured."""
+    file_path = tmp_path / "test_file.py"
+    content = """
+from typing import List, Dict, Optional
+
+@decorator
+def complex_function(data: List[Dict[str, Optional[int]]]) -> None:
+    pass
+"""
+    file_path.write_text(content)
+    
+    metadata = get_file_metadata(file_path, tmp_path)
+    
+    # Check that complex type is captured
+    assert "List[Dict[str, Optional[int]]]" in metadata.file_analysis
+    # Check that decorator is noted
+    assert "@decorator" in metadata.file_analysis
+
+def test_pattern_match_line_numbers(tmp_path):
+    """Test that pattern matches preserve original line numbers."""
+    file_path = tmp_path / "test_file.py"
+    content = """
+# Some code
+# More code
+# TODO: Fix this
+# More code
+# FIXME: Another issue
+"""
+    file_path.write_text(content)
+    
+    metadata = get_file_metadata(file_path, tmp_path)
+    
+    # Check that line numbers are preserved
+    assert "TODO (Line 4):" in metadata.file_analysis
+    assert "FIXME (Line 6):" in metadata.file_analysis
+
+def test_readme_directory_purpose(tmp_path):
+    """Test that README.md informs directory purpose but isn't counted as source."""
+    dir_path = tmp_path / "src"
+    dir_path.mkdir()
+    
+    # Create README.md
+    readme_path = dir_path / "README.md"
+    readme_path.write_text("# Source Directory\nContains core application logic.")
+    
+    # Create a source file
+    source_path = dir_path / "main.py"
+    source_path.write_text("print('hello')")
+    
+    dir_metadata = create_directory_summary(dir_path)
+    
+    # README should inform purpose
+    assert "core application logic" in dir_metadata.purpose.lower()
+    # But shouldn't be counted in files
+    assert len(dir_metadata.files) == 1
+    assert "main.py" in dir_metadata.files
+    assert "README.md" not in dir_metadata.files
+
+def test_html_code_block_format(tmp_path):
+    """Test that HTML formatter produces exact code block format."""
+    file_path = tmp_path / "test.py"
+    file_path.write_text("print('test')")
+    
+    metadata = get_file_metadata(file_path, tmp_path)
+    formatter = HTMLFormatter()
+    output = formatter.format([metadata])
+    
+    expected_pattern = '<pre><code class="python">'
+    assert expected_pattern in output
+
+def test_incremental_mode(tmp_path):
+    """Test that incremental mode only processes changed files."""
+    # Create initial files
+    file1 = tmp_path / "file1.py"
+    file2 = tmp_path / "file2.py"
+    file1.write_text("print('v1')")
+    file2.write_text("print('v1')")
+    
+    # First run to establish baseline
+    result1 = aggregate_files(
+        root_dir=str(tmp_path),
+        track_changes=True
+    )
+    
+    # Modify only file1
+    file1.write_text("print('v2')")
+    
+    # Second run in incremental mode
+    result2 = aggregate_files(
+        root_dir=str(tmp_path),
+        track_changes=True,
+        incremental=True  # New parameter
+    )
+    
+    # Only file1 should be marked as changed
+    assert "file1.py (modified)" in result2
+    assert "file2.py" not in result2
+
 if __name__ == '__main__':
     pytest.main() 

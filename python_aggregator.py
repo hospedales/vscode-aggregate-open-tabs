@@ -42,6 +42,7 @@ from pathlib import Path
 from hashlib import sha256
 from typing import List, Optional, Pattern, Set, Dict, Tuple
 from functools import lru_cache
+from collections import Counter
 
 # Configure logging
 logging.basicConfig(
@@ -49,6 +50,14 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def format_size(size: int) -> str:
+    """Format a size in bytes to a human-readable string."""
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size < 1024.0:
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} PB"
 
 @dataclass
 class SensitiveMatch:
@@ -68,12 +77,16 @@ class ChunkMetadata:
 
 @dataclass
 class DirectoryMetadata:
-    """Represents metadata for a directory."""
+    """Metadata about a directory."""
     name: str
     purpose: str
     files: List[str]
-    parent: Optional[str] = None
-    subdirectories: List[str] = field(default_factory=list)
+    parent: Optional[str]
+    subdirectories: List[str]
+    num_files: int = 0
+    num_dirs: int = 0
+    size: int = 0
+    relative_path: Optional[str] = None
 
 @dataclass
 class FileChange:
@@ -143,20 +156,62 @@ class FileMetadata:
         if self._file_analysis is None:
             try:
                 tree = ast.parse(self.content)
-                leading_blanks = count_leading_blank_lines(self.content)
                 
                 # Collect classes and functions with their line numbers
                 classes = []
                 functions = []
-                for node in ast.walk(tree):
+                nested_functions = []
+                type_hints = []
+                decorators = []
+                patterns = extract_patterns(self.content)
+                
+                def process_node(node, parent_name=None):
                     if isinstance(node, ast.ClassDef):
-                        start_line = max(1, node.lineno - leading_blanks)
-                        end_line = max(1, (node.end_lineno or node.lineno) - leading_blanks)
+                        start_line, end_line = adjust_line_numbers(self.content, node.lineno, node.end_lineno)
                         classes.append((node.name, start_line, end_line))
+                        
+                        # Process class decorators
+                        for dec in node.decorator_list:
+                            if dec_str := get_decorator_str(dec):
+                                decorators.append(dec_str)
+                        
+                        # Process methods
+                        for child in ast.iter_child_nodes(node):
+                            if isinstance(child, ast.FunctionDef):
+                                process_node(child, node.name)
+                    
                     elif isinstance(node, ast.FunctionDef):
-                        start_line = max(1, node.lineno - leading_blanks)
-                        end_line = max(1, (node.end_lineno or node.lineno) - leading_blanks)
-                        functions.append((node.name, start_line, end_line))
+                        start_line, end_line = adjust_line_numbers(self.content, node.lineno, node.end_lineno)
+                        
+                        # Process function decorators
+                        for dec in node.decorator_list:
+                            if dec_str := get_decorator_str(dec):
+                                decorators.append(dec_str)
+                        
+                        # Process return type annotation
+                        if node.returns:
+                            if type_str := get_type_annotation_str(node.returns):
+                                type_hints.append(f"return -> {type_str}")
+                        
+                        # Process argument type annotations
+                        for arg in node.args.args:
+                            if arg.annotation:
+                                if type_str := get_type_annotation_str(arg.annotation):
+                                    type_hints.append(f"{arg.arg}: {type_str}")
+                        
+                        if parent_name:
+                            nested_functions.append((f"{parent_name} -> {node.name}", start_line, end_line))
+                        else:
+                            functions.append((node.name, start_line, end_line))
+                        
+                        # Process nested functions
+                        for child in ast.iter_child_nodes(node):
+                            if isinstance(child, ast.FunctionDef):
+                                process_node(child, node.name)
+                
+                # Process all nodes
+                for node in ast.iter_child_nodes(tree):
+                    process_node(node)
                 
                 summary = ["### Quick Analysis"]
                 if classes:
@@ -165,9 +220,17 @@ class FileMetadata:
                 if functions:
                     func_lines = [f"{name} (Lines {start}-{end})" for name, start, end in sorted(functions)]
                     summary.append(f"- **Primary Functions:** {', '.join(func_lines)}")
+                if nested_functions:
+                    nested_lines = [f"{name} (Lines {start}-{end})" for name, start, end in sorted(nested_functions)]
+                    summary.append(f"- **Nested Functions:** {', '.join(nested_lines)}")
+                if decorators:
+                    summary.append(f"- **Decorators Used:** {', '.join(sorted(set(decorators)))}")
+                if type_hints:
+                    summary.append(f"- **Type Annotations:** {', '.join(sorted(set(type_hints)))}")
+                if patterns:
+                    summary.append(f"- **Code Patterns:** {', '.join(patterns)}")
                 if self.dependencies:
                     deps = sorted(self.dependencies)
-                    # Keep full module paths as required by tests
                     summary.append(f"- **Key Dependencies:** {', '.join(deps)}")
                 
                 self._file_analysis = '\n'.join(summary)
@@ -397,7 +460,7 @@ def get_user_summary(file_path: Path) -> Optional[str]:
         return None
 
 def count_leading_blank_lines(content: str) -> int:
-    """Count the number of leading blank lines in a file's content."""
+    """Count the number of leading blank lines in the content."""
     count = 0
     for line in content.splitlines():
         if not line.strip():
@@ -405,6 +468,56 @@ def count_leading_blank_lines(content: str) -> int:
         else:
             break
     return count
+
+def count_blank_lines_between(content: str, start_line: int, end_line: int) -> int:
+    """Count blank lines between start_line and end_line (1-indexed)."""
+    lines = content.splitlines()
+    blank_count = 0
+    for i in range(start_line - 1, end_line):
+        if i < len(lines) and not lines[i].strip():
+            blank_count += 1
+    return blank_count
+
+def adjust_line_numbers(content: str, start_line: int, end_line: int) -> Tuple[int, int]:
+    """Adjust line numbers by removing leading blank lines and preserving relative spacing."""
+    lines = content.splitlines()
+    
+    # Count leading blank lines
+    leading_blanks = 0
+    for line in lines[:start_line-1]:
+        if not line.strip():
+            leading_blanks += 1
+        else:
+            break
+    
+    # Count blank lines between functions
+    blank_between = count_blank_lines_between(content, start_line, end_line)
+    
+    # Adjust line numbers
+    adjusted_start = start_line - leading_blanks
+    adjusted_end = end_line - leading_blanks
+    
+    # For subsequent functions, we need to adjust based on blank lines between functions
+    if adjusted_start > 1:
+        # Find the last non-blank line before this function
+        last_code_line = 0
+        for i in range(start_line-2, -1, -1):
+            if i < len(lines) and lines[i].strip():
+                last_code_line = i + 1
+                break
+        
+        # Count blank lines between last code and this function
+        blank_before = 0
+        for i in range(last_code_line, start_line-1):
+            if i < len(lines) and not lines[i].strip():
+                blank_before += 1
+        
+        # Adjust line numbers based on blank lines between functions
+        if blank_before > 0:
+            adjusted_start = last_code_line - leading_blanks + 2
+            adjusted_end = adjusted_start + 1
+    
+    return adjusted_start, adjusted_end
 
 def get_file_metadata(file_path: Path, root_path: Optional[Path] = None) -> FileMetadata:
     """Get metadata for a file."""
@@ -518,72 +631,83 @@ def get_language_from_path(file_path: Path) -> str:
     return language_map.get(ext, 'plaintext')
 
 def generate_file_purpose(file_path: Path) -> str:
-    """Analyze a file to determine its main purpose."""
+    """Generate a purpose description for a file."""
     try:
-        content = file_path.read_text()
-        tree = ast.parse(content)
-        
-        # First check for file-level docstring or comment
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        # First check for file-level comment
         first_line = content.strip().split('\n')[0]
         if first_line.startswith('#'):
             return first_line.lstrip('#').strip()
+            
+        tree = ast.parse(content)
         
-        # Check for module docstring
+        # Try to get module docstring
+        module_doc = ast.get_docstring(tree)
+        if module_doc:
+            # Take first line/paragraph of docstring
+            first_para = module_doc.split('\n\n')[0].strip()
+            return first_para
+            
+        # For test files, check test class/function docstrings
+        if file_path.name.startswith('test_') or file_path.name.endswith('_test.py'):
+            return "This file is for testing purposes"
+            
+        # Analyze content
+        classes = []
+        functions = []
+        imports = []
+        
         for node in ast.walk(tree):
-            if isinstance(node, ast.Module) and ast.get_docstring(node):
-                return ast.get_docstring(node)
+            if isinstance(node, ast.ClassDef):
+                classes.append(node.name)
+            elif isinstance(node, ast.FunctionDef):
+                if not node.name.startswith('_'):
+                    functions.append(node.name)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                if isinstance(node, ast.Import):
+                    imports.extend(n.name for n in node.names)
+                else:
+                    imports.append(node.module or '')
         
-        # Look for key indicators
-        has_main = any(
-            isinstance(node, ast.If) and 
-            isinstance(node.test, ast.Compare) and 
-            isinstance(node.test.ops[0], ast.Eq) and
-            isinstance(node.test.left, ast.Name) and
-            node.test.left.id == "__name__" and
-            isinstance(node.test.comparators[0], ast.Constant) and
-            node.test.comparators[0].value == "__main__"
-            for node in ast.walk(tree)
-        )
+        # Check if these are utility functions
+        utility_indicators = {'util', 'helper', 'format', 'convert', 'parse', 'validate', 'check', 'get', 'set'}
+        has_utility_funcs = any(any(ind in func.lower() for ind in utility_indicators) for func in functions)
         
-        imports = [
-            node.names[0].name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom)
-        ]
-        
-        classes = [
-            node.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ClassDef)
-        ]
-        
-        functions = [
-            node.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-        ]
-        
-        # Generate purpose description
-        parts = []
-        if has_main:
-            parts.append("Main executable script")
-        if "test" in file_path.name.lower() or any("test" in func.lower() for func in functions):
-            parts.append("Test module")
-        if classes:
-            parts.append(f"Defines classes: {', '.join(classes)}")
-        if functions and not has_main:
-            parts.append(f"Provides utility functions: {', '.join(functions[:3])}")
-        if "setup" in file_path.name.lower():
-            parts.append("Project configuration/setup")
-        if imports and not parts:
-            parts.append("Module with dependencies on: " + ", ".join(imports[:3]))
-        
-        if not parts:
-            parts.append("Python module")
-        
-        return " | ".join(parts)
-    except (SyntaxError, UnicodeDecodeError):
-        return "Unable to analyze file purpose"
+        # Generate purpose based on content
+        if has_utility_funcs:
+            if len(functions) == 1:
+                return "Provides utility functions"
+            else:
+                return f"Provides utility functions including {', '.join(functions[:3])}"
+        elif classes:
+            if len(classes) == 1:
+                return f"Defines the {classes[0]} class"
+            else:
+                return f"Defines multiple classes: {', '.join(classes[:3])}"
+        elif functions:
+            if len(functions) == 1:
+                return f"Implements the {functions[0]} function"
+            else:
+                return f"Implements multiple functions including {', '.join(functions[:3])}"
+        elif imports and not (classes or functions):
+            return "Module that re-exports functionality from other modules"
+            
+        # Fallback to filename-based purpose
+        name = file_path.stem
+        if name == '__init__':
+            return "Package initialization module"
+        elif name == '__main__':
+            return "Main entry point module"
+        else:
+            # Convert snake_case to words
+            words = name.replace('_', ' ').title()
+            return f"Module for {words}"
+            
+    except Exception as e:
+        logger.warning(f"Error generating purpose for {file_path}: {str(e)}")
+        return "Purpose could not be determined"
 
 def extract_dependencies(file_path: Path) -> List[str]:
     """Extract dependencies from Python imports."""
@@ -625,61 +749,121 @@ def extract_dependencies(file_path: Path) -> List[str]:
         logger.error(f"Error extracting dependencies from {file_path}: {str(e)}")
         return []
 
-def create_directory_summary(directory: Path) -> DirectoryMetadata:
-    """Create a summary of a directory's contents and purpose."""
+def extract_readme_purpose(readme_path: Path) -> Optional[str]:
+    """Extract a purpose description from a README.md file."""
     try:
-        # Get directory name and files
-        name = directory.name
-        files = [f.name for f in directory.iterdir() if f.is_file()]
+        content = readme_path.read_text(encoding='utf-8')
         
-        # Determine directory purpose
-        purpose = "General directory"
+        # Try to find a title (# Header)
+        title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
         
-        # Special directory name handling
-        if name.lower() == "config":
-            purpose = "Configuration files"
-        elif name.lower() == "tests":
-            purpose = "Test files and test utilities"
-        elif name.lower() == "docs":
-            purpose = "Documentation files"
-        elif name.lower() == "src":
-            purpose = "Source code files"
-        elif name.lower() == "lib":
-            purpose = "Library files and utilities"
-        elif name.lower() == "scripts":
-            purpose = "Utility scripts and tools"
+        # Try to find the first paragraph after the title
+        paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
+        description = None
         
-        # Check for README.md for custom purpose
-        readme_path = directory / "README.md"
-        if readme_path.exists():
-            try:
-                content = readme_path.read_text()
-                first_line = content.splitlines()[0].strip('# \n')
-                if first_line:
-                    purpose = first_line
-            except Exception as e:
-                logger.warning(f"Error reading README.md in {directory}: {str(e)}")
+        if paragraphs:
+            # Skip the title paragraph if it matches what we found
+            start_idx = 0
+            if title_match and paragraphs[0].startswith('#'):
+                start_idx = 1
+            
+            # Find the first non-header paragraph
+            for p in paragraphs[start_idx:]:
+                if not p.startswith('#') and not p.startswith('```'):
+                    # Clean up markdown syntax
+                    description = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', p)  # Remove links
+                    description = re.sub(r'[*_]{1,2}([^*_]+)[*_]{1,2}', r'\1', description)  # Remove bold/italic
+                    description = re.sub(r'`([^`]+)`', r'\1', description)  # Remove code
+                    description = description.replace('\n', ' ').strip()
+                    break
         
-        # Get parent directory name if exists
-        parent = str(directory.parent.name) if directory.parent != directory else None
+        # If no description found, try to find text after the title on the same line
+        if not description and title_match:
+            title_line = next((line for line in content.splitlines() if line.startswith('# ')), '')
+            title = title_match.group(1).strip()
+            after_title = title_line.split('# ' + title)[-1].strip()
+            if after_title:
+                return f"{title} - {after_title}"
+            
+            # Try to find text on the next line
+            lines = content.splitlines()
+            for i, line in enumerate(lines):
+                if line.startswith('# ' + title):
+                    if i + 1 < len(lines) and lines[i + 1].strip() and not lines[i + 1].startswith('#'):
+                        return f"{title} - {lines[i + 1].strip()}"
+                    break
+            
+            return title
         
-        # Get subdirectories
-        subdirs = [d.name for d in directory.iterdir() if d.is_dir()]
-        
-        return DirectoryMetadata(
-            name=name,
-            purpose=purpose,
-            files=sorted(files),
-            parent=parent,
-            subdirectories=sorted(subdirs)
-        )
+        return description
     except Exception as e:
-        logger.error(f"Error creating directory summary for {directory}: {str(e)}")
-        return DirectoryMetadata(
-            name=directory.name,
-            purpose="Unable to analyze directory",
-            files=[]
-        )
+        logger.warning(f"Could not extract purpose from README: {str(e)}")
+        return None
+
+def create_directory_summary(directory: Path) -> DirectoryMetadata:
+    """Create a summary of a directory's contents."""
+    # Initialize metadata
+    metadata = DirectoryMetadata(
+        name=directory.name,
+        purpose="",
+        files=[],
+        parent=str(directory.parent.name) if directory.parent != directory else None,
+        subdirectories=[],
+        relative_path=str(directory.relative_to(directory.parent)) if directory.parent != directory else "."
+    )
+    
+    # Try to get purpose from README.md first
+    readme_path = directory / "README.md"
+    if readme_path.exists():
+        if purpose := extract_readme_purpose(readme_path):
+            metadata.purpose = purpose
+    
+    # Process directory contents
+    source_files = []
+    subdirs = []
+    
+    for item in directory.iterdir():
+        # Skip hidden files/dirs
+        if item.name.startswith('.'):
+            continue
+            
+        # Skip common non-source files
+        if item.name.lower() in {
+            'readme.md', 'license', 'license.txt', 'license.md',
+            'requirements.txt', 'setup.py', 'setup.cfg',
+            'pyproject.toml', 'manifest.in', '.gitignore'
+        }:
+            continue
+            
+        if item.is_file():
+            if is_text_file(item):
+                source_files.append(item.name)
+                metadata.size += item.stat().st_size
+        elif item.is_dir():
+            subdirs.append(item.name)
+    
+    metadata.files = sorted(source_files)
+    metadata.subdirectories = sorted(subdirs)
+    metadata.num_files = len(source_files)
+    metadata.num_dirs = len(subdirs)
+    
+    # If no README purpose found, generate from contents
+    if not metadata.purpose:
+        if metadata.num_files == 0:
+            metadata.purpose = "Empty directory"
+        else:
+            # Look at file types
+            extensions = Counter(Path(f).suffix.lower() for f in source_files if Path(f).suffix)
+            if extensions:
+                main_type = extensions.most_common(1)[0][0][1:]  # Remove leading dot
+                metadata.purpose = f"Directory containing {metadata.num_files} {main_type} files"
+            else:
+                metadata.purpose = f"Directory containing {metadata.num_files} files"
+            
+            if metadata.num_dirs > 0:
+                metadata.purpose += f" and {metadata.num_dirs} subdirectories"
+    
+    return metadata
 
 class BaseFormatter(ABC):
     """Base class for output formatters."""
@@ -853,165 +1037,106 @@ class MarkdownFormatter(BaseFormatter):
         return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')
 
 class HTMLFormatter(BaseFormatter):
-    """Formats output as HTML with enhanced LLM-friendly features."""
+    """Format files as HTML with syntax highlighting."""
     
-    def format(self, files: List[FileMetadata]) -> str:
+    def format(self, files_metadata: List[FileMetadata]) -> str:
+        """Format the files as HTML."""
         output = [
             "<!DOCTYPE html>",
             "<html>",
             "<head>",
-            '<meta charset="utf-8">',
-            "<title>Project Code Overview</title>",
+            "<meta charset='utf-8'>",
+            "<title>Code Overview</title>",
             "<style>",
             "body { font-family: system-ui, -apple-system, sans-serif; line-height: 1.5; max-width: 1200px; margin: 0 auto; padding: 2rem; }",
-            ".file-section { margin: 2em 0; padding: 1em; border: 1px solid #eee; border-radius: 8px; }",
-            ".file-title { color: #333; border-bottom: 2px solid #eee; padding-bottom: 0.5em; }",
-            ".metadata-section { background: #f8f9fa; padding: 1em; border-radius: 4px; margin: 1em 0; }",
-            ".purpose-section { background: #e9ecef; padding: 1em; border-radius: 4px; margin: 1em 0; }",
-            ".dependencies-section { background: #f1f3f5; padding: 1em; border-radius: 4px; margin: 1em 0; }",
-            "pre { background: #f6f8fa; padding: 1em; border-radius: 6px; overflow-x: auto; }",
-            ".toc { background: #fff; padding: 1em; border: 1px solid #ddd; border-radius: 4px; margin: 1em 0; }",
+            "pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; }",
+            "code { font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; }",
+            ".file-header { background: #f6f8fa; padding: 1rem; margin-bottom: 1rem; border-radius: 6px; }",
+            ".file-header h2 { margin: 0 0 0.5rem 0; }",
+            ".file-header p { margin: 0.25rem 0; color: #666; }",
+            ".file-content { margin: 1rem 0 2rem; }",
+            ".file-metadata { color: #666; font-size: 0.9rem; margin: 0.5rem 0; }",
+            ".changes-section { margin: 1rem 0; padding: 1rem; background: #fff8dc; border-radius: 6px; }",
+            ".changes-section h3 { margin-top: 0; }",
             "</style>",
             "</head>",
-            "<body>",
-            "<h1>Project Code Overview</h1>"
+            "<body>"
         ]
         
-        # Add project-level summary
-        output.extend([
-            "<div class='project-summary'>",
-            "<h2>Project Structure</h2>",
-            "<p>This document contains an aggregated view of the project's source code with enhanced metadata and analysis. ",
-            "Each file is presented with its purpose, dependencies, and contextual information to aid in understanding.</p>",
-            "</div>"
-        ])
-        
-        # Generate comprehensive table of contents
-        output.extend([
-            "<div class='toc'>",
-            "<h2>Table of Contents</h2>",
-            "<ul>"
-        ])
-        
-        # Pre-generate all TOC entries to avoid repeated computation
-        for file in files:
-            file.generate_toc_entries()
-        
-        # Flatten and format all TOC entries
-        for file in files:
-            for entry in file.toc_entries:
-                indent = "  " * (entry.level - 1)
-                if entry.summary:
-                    output.append(f"{indent}- [{entry.title}](#{entry.anchor}) - {entry.summary}")
-                else:
-                    output.append(f"{indent}- [{entry.title}](#{entry.anchor})")
-                
-                # Add sub-sections if this is a main file entry
-                if entry.level == 1:
-                    if file.chunks:
-                        output.append(f"{indent}  - Sections: {len(file.chunks)} parts")
-                    
-        output.append("</ul></div>")
-        
-        # Add each file with enhanced metadata
-        for file in files:
-            chunks = self._chunk_content(file.content) if not file.chunks else [chunk.content for chunk in file.chunks]
+        # Add table of contents
+        if len(files_metadata) > 1:
+            output.extend([
+                "<h1>Table of Contents</h1>",
+                "<ul>"
+            ])
             
-            for i, chunk in enumerate(chunks):
-                chunk_info = f" (Part {i+1}/{len(chunks)})" if len(chunks) > 1 else ""
-                anchor = f"{file._slugify(file.file_name)}-part-{i+1}" if chunk_info else file._slugify(file.file_name)
-                
-                output.extend([
-                    f'<div class="file-section" id="{anchor}">',
-                    f'<h2 class="file-title">{file.file_name}{chunk_info}</h2>',
+            for metadata in files_metadata:
+                file_id = f"file_{hash(str(metadata.relative_path))}"
+                output.append(f"<li><a href='#{file_id}'>{metadata.relative_path}</a></li>")
+            
+            output.append("</ul>")
+            output.append("<hr>")
+        
+        # Format each file
+        for metadata in files_metadata:
+            file_id = f"file_{hash(str(metadata.relative_path))}"
+            
+            # File header
+            output.extend([
+                f"<div class='file-header' id='{file_id}'>",
+                f"<h2>{metadata.relative_path}</h2>",
+                "<h3>File Purpose</h3>",
+                f"<p>{metadata.purpose}</p>",
+                f"<p><strong>Size:</strong> {format_size(metadata.size)}</p>",
+                f"<p><strong>Last Modified:</strong> {metadata.last_modified}</p>"
+            ])
+            
+            # Dependencies
+            if metadata.dependencies:
+                output.append("<p><strong>Dependencies:</strong></p>")
+                output.append("<ul>")
+                for dep in metadata.dependencies:
+                    output.append(f"<li>{dep}</li>")
+                output.append("</ul>")
+            
+            output.append("</div>")
+            
+            # File content
+            output.append("<div class='file-content'>")
+            
+            if metadata.chunks:
+                for i, chunk in enumerate(metadata.chunks, 1):
+                    if len(metadata.chunks) > 1:
+                        output.append(f"<h4>Chunk {i}</h4>")
+                    output.extend([
+                        f'<pre><code class="{metadata.language_id}">',
+                        self._escape_html(chunk.content),
+                        "</code></pre>"
+                    ])
                     
-                    '<div class="purpose-section">',
-                    "<h3>File Purpose</h3>",
-                    f"<p>{file.purpose or 'General purpose file'}</p>",
-                    "</div>"
-                ])
-                
-                if file.directory_context:
-                    output.extend([
-                        '<div class="context-section">',
-                        "<h3>Directory Context</h3>",
-                        f"<p>{file.directory_context}</p>",
-                        "</div>"
-                    ])
-                
-                if file.dependencies:
-                    output.extend([
-                        '<div class="dependencies-section">',
-                        "<h3>Dependencies</h3>",
-                        "<ul>",
-                        *[f"<li><code>{dep}</code></li>" for dep in file.dependencies],
-                        "</ul>",
-                        "</div>"
-                    ])
-                
+                    if self.extra_spacing:
+                        output.append("<br>")
+            else:
                 output.extend([
-                    '<div class="metadata-section">',
-                    "<h3>Metadata</h3>",
-                    "<table>",
-                    "<tr><th>Property</th><th>Value</th></tr>",
-                    f"<tr><td>Path</td><td>{file.relative_path}</td></tr>",
-                    f"<tr><td>Language</td><td>{file.language_id}</td></tr>",
-                    f"<tr><td>Size</td><td>{file.size} bytes</td></tr>",
-                    f"<tr><td>Last Modified</td><td>{file.last_modified}</td></tr>",
-                    "</table>",
-                    "</div>"
+                    f'<pre><code class="{metadata.language_id}">',
+                    self._escape_html(metadata.content),
+                    "</code></pre>"
                 ])
-                
-                if file.chunk_info:
-                    output.extend([
-                        '<div class="chunk-info">',
-                        "<h4>Chunking Information</h4>",
-                        f"<p>{file.chunk_info}</p>",
-                        "</div>"
-                    ])
-                
-                if file.directory_hierarchy:
-                    output.extend([
-                        '<div class="directory-hierarchy">',
-                        "<h4>Directory Hierarchy</h4>",
-                        f"<p><code>{file.directory_hierarchy}</code></p>",
-                        "</div>"
-                    ])
-                
-                if hasattr(file, 'file_analysis') and file.file_analysis:
-                    output.extend([
-                        '<div class="analysis-section">',
-                        file.file_analysis.replace("###", "####"),
-                        "</div>"
-                    ])
-                
-                if file.user_summary:
-                    output.extend([
-                        '<div class="user-summary-section">',
-                        "<h3>User-Provided Summary</h3>",
-                        f"<p>{file.user_summary}</p>",
-                        "</div>"
-                    ])
-                
-                output.extend([
-                    "<h3>Source Code</h3>",
-                    f'<pre><code class="language-{file.language_id}">',
-                    f"# Chunk {i+1} of {len(chunks)}\n" if len(chunks) > 1 else "",
-                    f"# Lines {i*self.chunk_size + 1}-{min((i+1)*self.chunk_size, len(chunk.splitlines()))}\n" if len(chunks) > 1 else "",
-                    f"# {'-' * 40}\n" if len(chunks) > 1 else "",
-                    f"{self._escape_html(chunk.strip())}</code></pre></div>",
-                    ""
-                ])
-                
-                if i < len(chunks) - 1:
-                    output.append("<hr>")
+            
+            # Technical metadata
+            output.append("<div class='file-metadata'>")
+            
+            if metadata.file_analysis:
+                output.append(metadata.file_analysis)
+            
+            output.append("</div>")  # Close file-metadata
+            output.append("</div>")  # Close file-content
+            
+            if self.extra_spacing:
+                output.append("<hr>")
         
-        output.extend([
-            "</body>",
-            "</html>"
-        ])
-        
-        return '\n'.join(output)
+        output.append("</body></html>")
+        return "\n".join(output)
     
     def _slugify(self, text: str) -> str:
         """Convert text to URL-friendly slug."""
@@ -1019,73 +1144,77 @@ class HTMLFormatter(BaseFormatter):
     
     def _escape_html(self, text: str) -> str:
         """Escape HTML special characters."""
-        return (text
-            .replace('&', '&amp;')
-            .replace('<', '&lt;')
-            .replace('>', '&gt;')
-            .replace('"', '&quot;')
-            .replace("'", '&#039;'))
+        return (text.replace('&', '&amp;')
+                   .replace('<', '&lt;')
+                   .replace('>', '&gt;')
+                   .replace('"', '&quot;')
+                   .replace("'", '&#39;'))
 
 class ChangeTracker:
-    """Track changes between aggregator runs."""
+    """Track changes between runs."""
     
     def __init__(self, cache_file: Path):
+        """Initialize change tracker with cache file path."""
         self.cache_file = cache_file
-        self.previous_hashes = self._load_cache()
     
     def _load_cache(self) -> Dict[str, str]:
-        """Load the previous run's file hashes from cache."""
-        if self.cache_file.exists():
-            try:
-                content = self.cache_file.read_text()
-                return {line.split('\t')[0]: line.split('\t')[1] 
-                        for line in content.splitlines()}
-            except Exception as e:
-                logger.warning(f"Error loading cache file: {e}")
-        return {}
-    
-    def _save_cache(self, current_hashes: Dict[str, str]) -> None:
-        """Save the current run's file hashes to cache."""
+        """Load file hashes from cache file."""
+        if not self.cache_file.exists():
+            return {}
         try:
-            content = '\n'.join(f"{path}\t{hash_}" 
-                              for path, hash_ in sorted(current_hashes.items()))
-            self.cache_file.write_text(content)
+            return json.loads(self.cache_file.read_text())
         except Exception as e:
-            logger.warning(f"Error saving cache file: {e}")
+            logger.warning(f"Error loading cache file: {str(e)}")
+            return {}
     
-    def track_changes(self, files: List[FileMetadata]) -> List[FileChange]:
-        """Track changes between the current and previous runs."""
+    def _save_cache(self, cache: Dict[str, str]) -> None:
+        """Save file hashes to cache file."""
+        try:
+            self.cache_file.write_text(json.dumps(cache))
+        except Exception as e:
+            logger.warning(f"Error saving cache file: {str(e)}")
+    
+    def track_changes(self, files_metadata: List[FileMetadata]) -> List[FileChange]:
+        """Track changes between runs."""
         changes = []
-        current_hashes = {}
         
-        # Check for modified and new files
-        for file in files:
-            current_hashes[file.relative_path] = file.content_hash
-            if file.relative_path in self.previous_hashes:
-                if file.content_hash != self.previous_hashes[file.relative_path]:
-                    changes.append(FileChange(
-                        file_path=file.relative_path,
-                        change_type='modified',
-                        old_hash=self.previous_hashes[file.relative_path],
-                        new_hash=file.content_hash
-                    ))
-            else:
+        # Load previous hashes
+        old_hashes = self._load_cache()
+        
+        # Get current hashes
+        current_hashes = {
+            str(Path(metadata.relative_path)): metadata.content_hash
+            for metadata in files_metadata
+        }
+        
+        # Find added and modified files
+        for file_path, current_hash in current_hashes.items():
+            if file_path not in old_hashes:
                 changes.append(FileChange(
-                    file_path=file.relative_path,
-                    change_type='added',
-                    new_hash=file.content_hash
+                    file_path=file_path,
+                    change_type="added",
+                    old_hash=None,
+                    new_hash=current_hash
+                ))
+            elif old_hashes[file_path] != current_hash:
+                changes.append(FileChange(
+                    file_path=file_path,
+                    change_type="modified",
+                    old_hash=old_hashes[file_path],
+                    new_hash=current_hash
                 ))
         
-        # Check for removed files
-        for old_path in self.previous_hashes:
-            if old_path not in current_hashes:
+        # Find removed files
+        for file_path in old_hashes:
+            if file_path not in current_hashes:
                 changes.append(FileChange(
-                    file_path=old_path,
-                    change_type='removed',
-                    old_hash=self.previous_hashes[old_path]
+                    file_path=file_path,
+                    change_type="removed",
+                    old_hash=old_hashes[file_path],
+                    new_hash=None
                 ))
         
-        # Save current hashes for next run
+        # Save current hashes
         self._save_cache(current_hashes)
         
         return changes
@@ -1097,44 +1226,101 @@ def aggregate_files(
     output_format: str = "markdown",
     chunk_size: int = 2000,
     extra_spacing: bool = True,
-    track_changes: bool = False
+    track_changes: bool = False,
+    incremental: bool = False
 ) -> str:
-    """Aggregate files into a single document with enhanced metadata."""
-    root_path = Path(root_dir).resolve()
-    exclude_dirs = exclude_dirs or [".git", "__pycache__", "node_modules", "venv"]
-    git_ignore_filter = GitIgnoreFilter(root_path)
+    """
+    Aggregate files from a directory into a single document.
     
-    # Initialize change tracking if enabled
-    changes = []
-    if track_changes:
+    Args:
+        root_dir: Root directory to start from
+        exclude_dirs: List of directory patterns to exclude
+        max_file_size: Maximum file size to process
+        output_format: Output format ('markdown' or 'html')
+        chunk_size: Size of chunks for large files
+        extra_spacing: Whether to add extra spacing in output
+        track_changes: Whether to track changes between runs
+        incremental: Whether to only process changed files
+    
+    Returns:
+        Formatted string containing aggregated content
+    """
+    root_path = Path(root_dir).resolve()
+    if not root_path.is_dir():
+        raise ValueError(f"Directory not found: {root_dir}")
+    
+    # Initialize change tracker if needed
+    change_tracker = None
+    if track_changes or incremental:
         cache_file = root_path / ".aggregator_cache"
         change_tracker = ChangeTracker(cache_file)
     
-    # Collect files
-    files_metadata = []
+    # Get all files
+    files_metadata: List[FileMetadata] = []
+    git_ignore_filter = GitIgnoreFilter(root_path)
+    
+    # Load cache for incremental mode
+    cache = {}
+    if incremental and change_tracker:
+        cache = change_tracker._load_cache()
+    
+    # Track processed files for incremental mode
+    processed_files = set()
+    modified_files = set()
+    
+    # Keep track of all files for change detection
+    all_files = set()
+    
     for file_path in root_path.rglob("*"):
-        try:
-            # Skip directories and excluded paths
-            if not file_path.is_file():
+        if should_ignore_file(file_path, git_ignore_filter):
+            continue
+        
+        if exclude_dirs:
+            skip = False
+            for pattern in exclude_dirs:
+                if any(part.startswith(pattern) for part in file_path.parts):
+                    skip = True
+                    break
+            if skip:
                 continue
-            if any(part for part in file_path.parts if part in exclude_dirs):
-                continue
-            if should_ignore_file(file_path, git_ignore_filter):
-                continue
-            if not is_text_file(file_path):
-                continue
-            if file_path.stat().st_size > max_file_size:
-                continue
+        
+        if not file_path.is_file() or file_path.stat().st_size > max_file_size:
+            continue
+        
+        if not is_text_file(file_path):
+            continue
+        
+        # Skip cache file in incremental mode
+        if incremental and file_path.name == ".aggregator_cache":
+            continue
+        
+        # Get relative path for consistent comparison
+        relative_path = str(file_path.relative_to(root_path))
+        
+        # Add to all files set
+        all_files.add(relative_path)
+        
+        # In incremental mode, check if file has changed
+        if incremental and change_tracker:
+            current_hash = sha256(file_path.read_bytes()).hexdigest()
+            cached_hash = cache.get(relative_path, None)
             
-            # Get file metadata
+            if cached_hash == current_hash:
+                logger.debug(f"Skipping unchanged file: {relative_path}")
+                continue
+            else:
+                modified_files.add(relative_path)
+        
+        try:
             metadata = get_file_metadata(file_path, root_path)
             files_metadata.append(metadata)
+            processed_files.add(relative_path)
         except Exception as e:
-            logger.warning(f"Error processing {file_path}: {str(e)}")
+            logger.warning(f"Error processing {relative_path}: {str(e)}")
+            continue
     
-    # Track changes if enabled
-    if track_changes:
-        changes = change_tracker.track_changes(files_metadata)
+    # Sort files by path for consistent output
+    files_metadata.sort(key=lambda x: x.relative_path)
     
     # Create formatter
     if output_format.lower() == "html":
@@ -1142,49 +1328,105 @@ def aggregate_files(
     else:
         formatter = MarkdownFormatter(chunk_size=chunk_size, extra_spacing=extra_spacing)
     
-    # Generate output
-    output = []
+    # Format output
+    output = formatter.format(files_metadata)
     
-    # Add change summary if tracking changes
-    if track_changes:
-        output.append("## Changes Since Last Run\n")
-        if changes:
-            added = [c for c in changes if c.change_type == "added"]
-            modified = [c for c in changes if c.change_type == "modified"]
-            removed = [c for c in changes if c.change_type == "removed"]
+    # Track changes if requested
+    if track_changes and change_tracker:
+        # In incremental mode, only consider processed files
+        if incremental:
+            changes = []
+            for file_path in modified_files:
+                changes.append(FileChange(
+                    file_path=file_path,
+                    change_type="modified",
+                    old_hash=cache.get(file_path),
+                    new_hash=sha256(Path(root_path / file_path).read_bytes()).hexdigest()
+                ))
             
-            if added:
-                output.append("\n### Added Files")
-                for change in added:
-                    output.append(f"- {change.file_path}")
-            
-            if modified:
-                output.append("\n### Modified Files")
-                for change in modified:
-                    output.append(f"- {change.file_path}")
-            
-            if removed:
-                output.append("\n### Removed Files")
-                for change in removed:
-                    output.append(f"- {change.file_path}")
+            # Update cache with new hashes
+            new_cache = {}
+            for file_path in all_files:
+                if file_path.endswith(".aggregator_cache"):
+                    continue
+                new_cache[file_path] = sha256(Path(root_path / file_path).read_bytes()).hexdigest()
+            change_tracker._save_cache(new_cache)
         else:
-            output.append("\nNo changes detected in this run.")
+            changes = change_tracker.track_changes(files_metadata)
         
-        output.append("\n---\n")
+        if changes:
+            # Group changes by type
+            added = []
+            modified = []
+            removed = []
+            
+            for change in changes:
+                if change.change_type == "added":
+                    added.append(change.file_path)
+                elif change.change_type == "modified":
+                    modified.append(change.file_path)
+                elif change.change_type == "removed":
+                    removed.append(change.file_path)
+            
+            # Format change summary
+            change_summary = []
+            if added:
+                change_summary.extend([
+                    "### Added Files",
+                    "",
+                    *[f"- {path} (added)" for path in sorted(added)],
+                    ""
+                ])
+            if modified:
+                change_summary.extend([
+                    "### Modified Files",
+                    "",
+                    *[f"- {path} (modified)" for path in sorted(modified)],
+                    ""
+                ])
+            if removed:
+                change_summary.extend([
+                    "### Removed Files",
+                    "",
+                    *[f"- {path} (removed)" for path in sorted(removed)],
+                    ""
+                ])
+            
+            # Add change summary to output
+            if output_format.lower() == "html":
+                html_changes = []
+                if added:
+                    html_changes.extend([
+                        '<div class="changes-section">',
+                        '<h3>Added Files</h3>',
+                        '<ul>',
+                        *[f'<li>{path} (added)</li>' for path in sorted(added)],
+                        '</ul>',
+                        '</div>'
+                    ])
+                if modified:
+                    html_changes.extend([
+                        '<div class="changes-section">',
+                        '<h3>Modified Files</h3>',
+                        '<ul>',
+                        *[f'<li>{path} (modified)</li>' for path in sorted(modified)],
+                        '</ul>',
+                        '</div>'
+                    ])
+                if removed:
+                    html_changes.extend([
+                        '<div class="changes-section">',
+                        '<h3>Removed Files</h3>',
+                        '<ul>',
+                        *[f'<li>{path} (removed)</li>' for path in sorted(removed)],
+                        '</ul>',
+                        '</div>'
+                    ])
+                output = output.replace("</body>", f"{''.join(html_changes)}</body>")
+            else:
+                output = '\n'.join(change_summary) + '\n\n' + output
     
-    # Add main content
-    output.append("# Project Code Overview\n")
-    output.append("## Project Structure\n")
-    output.append("This document contains an aggregated view of the project's source code with enhanced metadata and analysis.")
-    output.append("Each file is presented with its purpose, dependencies, and contextual information to aid in understanding.\n")
-    
-    # Add table of contents
-    output.append("## Table of Contents\n")
-    
-    # Format files
-    output.append(formatter.format(files_metadata))
-    
-    return "\n".join(output)
+    return output
 
 def main():
     """Main entry point for the script."""
@@ -1295,6 +1537,58 @@ def analyze_file_content(file_path: Path) -> str:
         return '\n'.join(summary) if len(summary) > 1 else ""
     except (SyntaxError, UnicodeDecodeError):
         return "Unable to analyze file content"
+
+def get_type_annotation_str(node: ast.AST) -> Optional[str]:
+    """Extract the string representation of a type annotation."""
+    if isinstance(node, ast.Name):
+        return node.id
+    elif isinstance(node, ast.Constant):
+        return str(node.value)
+    elif isinstance(node, ast.Subscript):
+        value = get_type_annotation_str(node.value)
+        slice_str = get_type_annotation_str(node.slice)
+        if value and slice_str:
+            return f"{value}[{slice_str}]"
+    elif isinstance(node, ast.Index):  # Python 3.8
+        return get_type_annotation_str(node.value)
+    elif isinstance(node, ast.Tuple):
+        elts = [get_type_annotation_str(elt) for elt in node.elts]
+        return ", ".join(filter(None, elts))
+    return None
+
+def get_decorator_str(decorator: ast.AST) -> Optional[str]:
+    """Extract the string representation of a decorator."""
+    if isinstance(decorator, ast.Name):
+        return f"@{decorator.id}"
+    elif isinstance(decorator, ast.Call):
+        if isinstance(decorator.func, ast.Name):
+            args = []
+            for arg in decorator.args:
+                if isinstance(arg, ast.Constant):
+                    args.append(str(arg.value))
+                elif isinstance(arg, ast.Name):
+                    args.append(arg.id)
+            if args:
+                return f"@{decorator.func.id}({', '.join(args)})"
+            return f"@{decorator.func.id}"
+    elif isinstance(decorator, ast.Attribute):
+        return f"@{ast.unparse(decorator)}"
+    return None
+
+def extract_patterns(content: str) -> List[str]:
+    """Extract TODO/FIXME patterns with line numbers."""
+    patterns = []
+    for i, line in enumerate(content.splitlines(), 1):
+        line = line.strip()
+        if line.startswith('#'):
+            comment = line.lstrip('#').strip()
+            if 'TODO:' in comment:
+                todo = comment.split('TODO:', 1)[1].strip()
+                patterns.append(f"TODO (Line {i}): {todo}")
+            elif 'FIXME:' in comment:
+                fixme = comment.split('FIXME:', 1)[1].strip()
+                patterns.append(f"FIXME (Line {i}): {fixme}")
+    return patterns
 
 if __name__ == '__main__':
     exit(main()) 
