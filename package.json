@@ -11,6 +11,15 @@
   "categories": [
     "Other"
   ],
+  "activationEvents": [
+    "onView:aggregateOpenTabsView",
+    "onCommand:extension.aggregateOpenTabs",
+    "onCommand:extension.selectiveAggregate",
+    "onCommand:extension.togglePreview",
+    "onCommand:extension.copyAggregatedContent",
+    "onCommand:extension.openConfiguration",
+    "onCommand:extension.refreshAggregateView"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
