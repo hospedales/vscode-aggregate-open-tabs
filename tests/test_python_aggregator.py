@@ -26,6 +26,7 @@ from python_aggregator import (
     is_text_file,
     GitIgnoreFilter,
     SensitiveMatch,
+    aggregate_files,
 )
 
 class TestEnhancedMetadata(unittest.TestCase):
@@ -76,7 +77,7 @@ DEBUG = True
         
         # New enhanced fields
         self.assertIsInstance(metadata.purpose, str)
-        self.assertIsInstance(metadata.dependencies, list)
+        self.assertIsInstance(metadata.dependencies, set)
         self.assertIsInstance(metadata.directory_context, str)
         
         # Check dependencies are correctly identified
@@ -226,33 +227,102 @@ def test_file_directory_hierarchy_path(tmp_path):
     assert file_metadata.relative_path == "dir1/dir2/dir3/test_file.py"
 
 def test_optional_summary_of_changes(tmp_path):
+    """Test that file changes are properly tracked and reported."""
     # Create a file and get its metadata
     file_path = tmp_path / "test_file.py"
+    cache_file = tmp_path / ".aggregator_cache"
+    
+    # First run - new file
     file_path.write_text("initial content")
-    initial_metadata = get_file_metadata(file_path)
-
-    # Modify the file and get metadata again
+    output1 = aggregate_files(
+        root_dir=str(tmp_path),
+        track_changes=True
+    )
+    
+    # Second run - modified file
     file_path.write_text("updated content")
-    updated_metadata = get_file_metadata(file_path)
-
-    # Verify that the summary of changes is included (simplified for testing)
-    # In a real implementation, this would involve a more robust change tracking mechanism
-    assert "Changes since last run" in updated_metadata.content
-    assert "No changes since last run" not in updated_metadata.content
+    output2 = aggregate_files(
+        root_dir=str(tmp_path),
+        track_changes=True
+    )
+    
+    # Third run - remove file
+    file_path.unlink()
+    output3 = aggregate_files(
+        root_dir=str(tmp_path),
+        track_changes=True
+    )
+ 
+    # Verify that the summary of changes is included
+    assert "Added Files" in output1  # First run should show the file as added
+    assert "test_file.py" in output1
+    
+    assert "Modified Files" in output2  # Second run should show the file as modified
+    assert "test_file.py" in output2
+    
+    assert "Removed Files" in output3  # Third run should show the file as removed
+    assert "test_file.py" in output3
 
 def test_user_customizable_summaries(tmp_path):
+    """Test that user-provided summaries are correctly read from sidecar files."""
     # Create a file and a sidecar file with a custom summary
     file_path = tmp_path / "test_file.py"
     sidecar_path = tmp_path / "test_file.py.notes"
+    
+    # Create both files with explicit mode
     file_path.write_text("content")
     sidecar_path.write_text("This is a user-provided summary.")
-
+    file_path.chmod(0o644)  # Read/write for owner, read for others
+    sidecar_path.chmod(0o644)  # Read/write for owner, read for others
+    
+    # Ensure the files exist and are readable
+    assert file_path.exists(), "Main file was not created"
+    assert sidecar_path.exists(), "Sidecar file was not created"
+    assert os.access(str(file_path), os.R_OK), "Main file is not readable"
+    assert os.access(str(sidecar_path), os.R_OK), "Sidecar file is not readable"
+    
+    # Print debug information
+    print(f"\nDebug info:")
+    print(f"Main file path: {file_path}")
+    print(f"Main file exists: {file_path.exists()}")
+    print(f"Main file is readable: {os.access(str(file_path), os.R_OK)}")
+    print(f"Sidecar file path: {sidecar_path}")
+    print(f"Sidecar file exists: {sidecar_path.exists()}")
+    print(f"Sidecar file is readable: {os.access(str(sidecar_path), os.R_OK)}")
+    print(f"Sidecar file content: {sidecar_path.read_text()}")
+    
     # Get metadata for the file
-    file_metadata = get_file_metadata(file_path)
-
+    file_metadata = get_file_metadata(file_path, tmp_path)
+    
     # Verify that the user summary is included
-    assert "User-Provided Summary" in file_metadata.content
-    assert "This is a user-provided summary." in file_metadata.content
+    assert file_metadata.user_summary == "This is a user-provided summary."
+    
+    # Test alternative sidecar file locations
+    notes_dir = tmp_path / ".notes"
+    notes_dir.mkdir()
+    alt_file_path = tmp_path / "alt_file.py"
+    alt_notes_path = notes_dir / "alt_file.py"
+    
+    # Create the alternative files with explicit mode
+    alt_file_path.write_text("content")
+    alt_notes_path.write_text("Alternative summary location")
+    alt_file_path.chmod(0o644)
+    alt_notes_path.chmod(0o644)
+    
+    # Ensure the alternative files exist and are readable
+    assert alt_file_path.exists(), "Alternative main file was not created"
+    assert alt_notes_path.exists(), "Alternative notes file was not created"
+    assert os.access(str(alt_file_path), os.R_OK), "Alternative main file is not readable"
+    assert os.access(str(alt_notes_path), os.R_OK), "Alternative notes file is not readable"
+    
+    alt_metadata = get_file_metadata(alt_file_path, tmp_path)
+    assert alt_metadata.user_summary == "Alternative summary location"
+    
+    # Test formatting
+    formatter = MarkdownFormatter()
+    output = formatter.format([file_metadata])
+    assert "### User-Provided Summary" in output
+    assert "This is a user-provided summary." in output
 
 def test_code_fence_language_mapping(tmp_path):
     # Create a Python file
@@ -274,9 +344,18 @@ def test_toc_with_sub_sections(tmp_path):
     large_file_metadata = get_file_metadata(large_file_path, tmp_path)
 
     # Verify that the TOC includes sub-sections for chunks
-    assert "Table of Contents" in large_file_metadata.content
-    assert "- large_file.py (Part 1)" in large_file_metadata.content
-    assert "- large_file.py (Part 2)" in large_file_metadata.content
+    large_file_metadata.generate_toc_entries()
+    
+    # Check TOC entries
+    assert len(large_file_metadata.toc_entries) > 1
+    assert large_file_metadata.toc_entries[0].title == "large_file.py"
+    assert large_file_metadata.toc_entries[1].title == "large_file.py (Part 1)"
+    
+    # Check formatting
+    formatter = MarkdownFormatter()
+    output = formatter.format([large_file_metadata])
+    assert "## Table of Contents" in output
+    assert "- [large_file.py (Part 1)]" in output
 
 # Existing tests (can be updated to cover new output format)
 def test_get_file_metadata(mock_file_metadata):
@@ -347,17 +426,4 @@ def test_gitignore_filter(tmp_path):
     assert not filter.should_ignore(tmp_path / "file.txt")
 
 if __name__ == '__main__':
-    pytest.main()
-
-# Skip tests for features not yet implemented
-@pytest.mark.skip(reason="Feature not yet implemented")
-def test_optional_summary_of_changes(tmp_path):
-    pass
-
-@pytest.mark.skip(reason="Feature not yet implemented")
-def test_user_customizable_summaries(tmp_path):
-    pass
-
-@pytest.mark.skip(reason="Feature not yet implemented")
-def test_toc_with_sub_sections(tmp_path):
-    pass 
+    pytest.main() 
