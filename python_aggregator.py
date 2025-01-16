@@ -58,19 +58,21 @@ class FileMetadata:
     directory_context: Optional[str] = None
     chunk_info: Optional[str] = None
     chunks: List[ChunkMetadata] = field(default_factory=list)
-    _file_analysis: Optional[str] = field(default=None)
+    _file_analysis: Optional[str] = field(default=None, init=False)
+    _formatted_content: str = field(default="", init=False)
+    directory_hierarchy: Optional[str] = None
     
     @property
     def formatted_content(self) -> str:
         """Get content with code fences and chunk demarcation."""
         if not self.chunks:
-            return f"```{self.language_id}\n{self.content}\n```"
+            return f"```{self.language_id}\n{self.content.strip()}\n```"
         
         formatted_chunks = []
         for i, chunk in enumerate(self.chunks, 1):
             formatted_chunks.append(
-                f"Chunk {i} of {len(self.chunks)}\n"
-                f"```{self.language_id}\n{chunk.content}\n```"
+                f"Chunk {i} of {len(self.chunks)} (Lines {chunk.start_line}-{chunk.end_line})\n"
+                f"```{self.language_id}\n{chunk.content.strip()}\n```"
             )
         return "\n\n".join(formatted_chunks)
     
@@ -267,11 +269,10 @@ def get_file_metadata(file_path: Path, root_path: Optional[Path] = None) -> File
                     if isinstance(node, (ast.Import, ast.ImportFrom)):
                         if isinstance(node, ast.Import):
                             for alias in node.names:
-                                metadata.dependencies.append(alias.name)
+                                metadata.dependencies.add(alias.name)
                         elif isinstance(node, ast.ImportFrom):
                             if node.module:
-                                for alias in node.names:
-                                    metadata.dependencies.append(f"{node.module}.{alias.name}")
+                                metadata.dependencies.add(node.module)
         except Exception as e:
             logger.warning(f"Error parsing imports in {file_path}: {e}")
     
@@ -300,6 +301,13 @@ def get_file_metadata(file_path: Path, root_path: Optional[Path] = None) -> File
         
         metadata.chunks = chunks
         metadata.chunk_info = f"File split into {len(chunks)} chunks"
+    
+    metadata.file_analysis = analyze_file_content(file_path)
+    parent_dir = file_path.parent    
+    if parent_dir != root_path:
+        metadata.directory_context = f"Part of the '{parent_dir.name}' directory"
+    else:
+        metadata.directory_context = "Root directory of the project"
     
     return metadata
 
@@ -585,6 +593,14 @@ class MarkdownFormatter(BaseFormatter):
                         ""
                     ])
                 
+                # Directory hierarchy
+                if file.directory_hierarchy:
+                    output.extend([
+                        "#### Directory Hierarchy",
+                        f"`{file.directory_hierarchy}`",
+                        ""
+                    ])
+                
                 # Technical metadata in YAML format
                 output.extend([
                     "### Metadata",
@@ -600,7 +616,7 @@ class MarkdownFormatter(BaseFormatter):
                 # Chunk information if present
                 if file.chunk_info:
                     output.extend([
-                        "### Chunking Information",
+                        "#### Chunking Information",
                         file.chunk_info,
                         ""
                     ])
@@ -723,8 +739,16 @@ class HTMLFormatter(BaseFormatter):
                 if file.chunk_info:
                     output.extend([
                         '<div class="chunk-info">',
-                        "<h3>Chunking Information</h3>",
+                        "<h4>Chunking Information</h4>",
                         f"<p>{file.chunk_info}</p>",
+                        "</div>"
+                    ])
+                
+                if file.directory_hierarchy:
+                    output.extend([
+                        '<div class="directory-hierarchy">',
+                        "<h4>Directory Hierarchy</h4>",
+                        f"<p><code>{file.directory_hierarchy}</code></p>",
                         "</div>"
                     ])
                 
