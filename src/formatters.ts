@@ -13,6 +13,8 @@ export interface FormatOptions {
     includeImports?: boolean;
     includeExports?: boolean;
     includeDependencies?: boolean;
+    includeCrossReferences?: boolean;
+    includeTags?: boolean;
     aiSummaryStyle?: 'concise' | 'detailed';
     includeAiSummaries?: boolean;
 }
@@ -28,6 +30,8 @@ interface FormatterOptions {
     includeImports?: boolean;
     includeExports?: boolean;
     includeDependencies?: boolean;
+    includeCrossReferences?: boolean;
+    includeTags?: boolean;
     aiSummaryStyle?: 'concise' | 'detailed';
     useCodeFences?: boolean;
 }
@@ -307,6 +311,46 @@ export class PlainTextFormatter extends BaseFormatter {
                     });
                 }
             }
+
+            // Add cross-references if available and requested
+            if (this.options.includeCrossReferences && metadata.analysis.crossReferences) {
+                const { references, referencedBy } = metadata.analysis.crossReferences;
+                
+                if (references.length > 0 || referencedBy.length > 0) {
+                    lines.push('',
+                        '// Cross References',
+                        '// ---------------');
+                    
+                    if (references.length > 0) {
+                        lines.push('// References:');
+                        references.forEach(ref => {
+                            const symbol = ref.symbol ? ` (${ref.symbol})` : '';
+                            lines.push(`//   → ${ref.targetFile}${symbol} - Line ${ref.location.line + 1}`);
+                        });
+                    }
+                    
+                    if (referencedBy.length > 0) {
+                        if (references.length > 0) lines.push('//');
+                        lines.push('// Referenced By:');
+                        referencedBy.forEach(ref => {
+                            const symbol = ref.symbol ? ` (${ref.symbol})` : '';
+                            lines.push(`//   ← ${ref.sourceFile}${symbol} - Line ${ref.location.line + 1}`);
+                        });
+                    }
+                }
+            }
+
+            // Add tags if available and requested
+            if (this.options.includeTags && metadata.analysis.tags?.length) {
+                lines.push('',
+                    '// Tags',
+                    '// ----');
+                metadata.analysis.tags.forEach(tag => {
+                    const scope = tag.scope === 'both' ? '' : ` (${tag.scope})`;
+                    const desc = tag.description ? ` - ${tag.description}` : '';
+                    lines.push(`// • ${tag.name}${scope}${desc}`);
+                });
+            }
         }
 
         lines.push('',
@@ -406,7 +450,12 @@ export class MarkdownFormatter extends BaseFormatter {
                     lines.push('</details>\n');
                 }
                 if (dir !== '.') {
-                    lines.push(`<details open><summary>📁 ${dir}/</summary>\n`);
+                    // Add directory tags if any
+                    const dirTags = file.analysis?.tags?.filter(t => t.scope === 'directory');
+                    const tagStr = dirTags?.length 
+                        ? ` *(${dirTags.map(t => t.name).join(', ')})*`
+                        : '';
+                    lines.push(`<details open><summary>📁 ${dir}/${tagStr}</summary>\n`);
                 }
                 currentDir = dir;
             }
@@ -421,6 +470,12 @@ export class MarkdownFormatter extends BaseFormatter {
             }
             if (file.analysis?.frameworks?.length) {
                 metadata.push(`Uses: ${file.analysis.frameworks.join(', ')}`);
+            }
+            if (this.options.includeTags && file.analysis?.tags?.length) {
+                const fileTags = file.analysis.tags.filter(t => t.scope !== 'directory');
+                if (fileTags.length) {
+                    metadata.push(`Tags: ${fileTags.map(t => t.name).join(', ')}`);
+                }
             }
             
             lines.push(metadata.length ? `${fileLink} *(${metadata.join(' | ')})* ` : fileLink);
@@ -487,12 +542,49 @@ export class MarkdownFormatter extends BaseFormatter {
             if (metadata.analysis.exports?.length) {
                 lines.push(`| Exports | ${metadata.analysis.exports.join(', ')} |`);
             }
+
+            // Add tags if available and requested
+            if (this.options.includeTags && metadata.analysis.tags?.length) {
+                lines.push('| Tags | ' + metadata.analysis.tags.map(tag => {
+                    const color = tag.color ? `<span style="color: ${tag.color}">⬤</span> ` : '';
+                    const icon = tag.icon ? `$(${tag.icon}) ` : '';
+                    return `${color}${icon}${tag.name}${tag.description ? ` - ${tag.description}` : ''}`;
+                }).join('<br>') + ' |');
+            }
         }
+        
         lines.push('\n</details>');
 
-        // Add extra spacing after metadata section if enabled
-        if (this.options.extraSpacing) {
-            lines.push('');
+        // Add cross-references if available and requested
+        if (this.options.includeCrossReferences && metadata.analysis?.crossReferences) {
+            const { references, referencedBy } = metadata.analysis.crossReferences;
+            
+            if (references.length > 0 || referencedBy.length > 0) {
+                lines.push('\n<details><summary>Cross References</summary>\n');
+                
+                if (references.length > 0) {
+                    lines.push('**References:**');
+                    references.forEach(ref => {
+                        const symbol = ref.symbol ? ` (${ref.symbol})` : '';
+                        lines.push(`- [${ref.targetFile}](#${this.slugify(ref.targetFile)})${symbol} - Line ${ref.location.line + 1}`);
+                    });
+                    lines.push('');
+                }
+                
+                if (referencedBy.length > 0) {
+                    lines.push('**Referenced By:**');
+                    referencedBy.forEach(ref => {
+                        const symbol = ref.symbol ? ` (${ref.symbol})` : '';
+                        lines.push(`- [${ref.sourceFile}](#${this.slugify(ref.sourceFile)})${symbol} - Line ${ref.location.line + 1}`);
+                    });
+                }
+                
+                lines.push('\n</details>');
+                
+                if (this.options.extraSpacing) {
+                    lines.push('');
+                }
+            }
         }
 
         // Add AI summary and key points if available

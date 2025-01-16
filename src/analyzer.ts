@@ -1,4 +1,8 @@
 import * as vscode from 'vscode';
+import { CrossReferenceTracker } from './cross-references';
+
+// Initialize cross-reference tracker as a singleton
+const crossRefTracker = new CrossReferenceTracker();
 
 export interface AnalyzeOptions {
     tailored?: boolean;
@@ -6,6 +10,7 @@ export interface AnalyzeOptions {
     includeImports?: boolean;
     includeExports?: boolean;
     includeDependencies?: boolean;
+    includeCrossReferences?: boolean;
     aiSummaryStyle?: 'concise' | 'detailed';
     languageMap?: Record<string, string>;
 }
@@ -21,6 +26,10 @@ export async function analyzeFile(
     imports: string[];
     aiSummary?: string;
     keyPoints?: string[];
+    crossReferences?: {
+        referencedBy: any[];
+        references: any[];
+    };
 }> {
     const content = document.getText();
     const frameworks = detectFrameworks(content);
@@ -40,13 +49,20 @@ export async function analyzeFile(
         generateAISummary(content, document.languageId, options.aiSummaryStyle) : 
         { aiSummary: undefined, keyPoints: undefined };
 
+    // Get cross-references if requested
+    let crossReferences;
+    if (options.includeCrossReferences) {
+        crossReferences = await crossRefTracker.analyzeFile(document);
+    }
+
     return {
         frameworks,
         purpose,
         dependencies,
         exports: options.includeExports ? exports : [],
         imports: options.includeImports ? imports : [],
-        ...(options.includeKeyPoints ? { aiSummary, keyPoints } : {})
+        ...(options.includeKeyPoints ? { aiSummary, keyPoints } : {}),
+        ...(options.includeCrossReferences ? { crossReferences } : {})
     };
 }
 

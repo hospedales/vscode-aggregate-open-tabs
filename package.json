@@ -290,6 +290,11 @@
           "type": "boolean",
           "default": false,
           "description": "Show the aggregation preview panel when the extension starts."
+        },
+        "aggregateOpenTabs.includeCrossReferences": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include cross-references between files in the output (imports, exports, dependencies)."
         }
       }
     }
@@ -304,9 +309,13 @@
   },
   "devDependencies": {
     "@types/minimatch": "^5.1.2",
-    "@types/node": "^16.x",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.10.6",
     "@types/vscode": "^1.74.0",
-    "typescript": "^4.x"
+    "mocha": "^10.2.0",
+    "minimatch": "^9.0.3",
+    "node-fetch": "^2.7.0",
+    "typescript": "^5.3.3"
   },
   "repository": {
     "type": "git",
@@ -315,7 +324,6 @@
   "publisher": "hospedales",
   "dependencies": {
     "@types/node-fetch": "^2.6.12",
-    "minimatch": "^9.0.3",
     "node-fetch": "^2.7.0"
   }
 }

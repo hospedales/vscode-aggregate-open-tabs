@@ -1,6 +1,18 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
+import { AppliedTag } from './tags';
+
+export interface CrossReference {
+    sourceFile: string;
+    targetFile: string;
+    type: 'import' | 'export' | 'dependency';
+    location: {
+        line: number;
+        character: number;
+    };
+    symbol?: string;  // The specific symbol being referenced
+}
 
 export interface FileAnalysis {
     purpose?: string;
@@ -10,6 +22,11 @@ export interface FileAnalysis {
     exports: string[];
     aiSummary?: string;
     keyPoints?: string[];
+    crossReferences?: {
+        referencedBy: any[];
+        references: any[];
+    };
+    tags?: AppliedTag[];
 }
 
 export interface FileMetadata {
