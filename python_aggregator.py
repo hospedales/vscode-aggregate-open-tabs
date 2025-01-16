@@ -124,7 +124,11 @@ def should_ignore_file(file_path: Path) -> bool:
         r'node_modules',
         r'\.git/',
         r'\.DS_Store$',
-        r'Thumbs\.db$'
+        r'Thumbs\.db$',
+        r'__pycache__',  # Ignore Python cache directories
+        r'\.pyc$',       # Ignore Python compiled files
+        r'\.pyo$',       # Ignore Python optimized files
+        r'\.pyd$'        # Ignore Python dynamic libraries
     ]
     
     str_path = str(file_path)

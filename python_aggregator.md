@@ -100,6 +100,10 @@ The following patterns are ignored by default:
 - `.git/`
 - `.DS_Store`
 - `Thumbs.db`
+- `__pycache__/`
+- `.pyc` (Python compiled files)
+- `.pyo` (Python optimized files)
+- `.pyd` (Python dynamic libraries)
 
 ## Binary File Handling
 
