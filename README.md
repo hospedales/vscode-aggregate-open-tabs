@@ -316,27 +316,58 @@ Happy coding!
 
 ## Python Aggregator
 
-A standalone Python script is now available for project-wide file aggregation. This complements the VS Code extension by providing a command-line interface that can process entire project directories, not just open tabs.
+A standalone Python script is now available for project-wide file aggregation. This complements the VS Code extension by providing both a command-line interface and a graphical interface that can process entire project directories, not just open tabs.
 
 ### Key Features
-- Recursive directory traversal
-- Multiple output formats (plaintext, markdown, HTML)
-- Sensitive data detection and redaction
-- Configurable file chunking
-- Customizable file exclusions
-- No external dependencies required
+- **Intelligent File Analysis**
+  - Framework and dependency detection
+  - Cross-file reference tracking
+  - Directory structure analysis
+  - Purpose detection for files and directories
+  - Language-specific parsing and analysis
+
+- **Multiple Interfaces**
+  - Command-line interface for automation
+  - Graphical interface with real-time preview
+  - Programmatic API for integration
+
+- **Performance Features**
+  - Incremental processing
+  - Change tracking between runs
+  - Large file chunking
+  - Memory-efficient processing
+
+- **Security & Privacy**
+  - Sensitive data detection (API keys, passwords)
+  - Configurable redaction options
+  - Custom pattern support
+  - Respects `.gitignore` patterns
+
+### Requirements
+- Python 3.7 or higher
+- No external dependencies (uses standard library only)
+- Optional GUI requires Tkinter (included with most Python installations)
 
 ### Installation
 
-1. Copy `python_aggregator.py` to your project directory
-2. Make it executable (Unix-like systems):
+1. Copy the script files to your project:
+   ```bash
+   # Command-line version
+   cp python_aggregator.py /path/to/your/project/
+
+   # GUI version (optional)
+   cp python_aggregator_gui.py /path/to/your/project/
+   ```
+
+2. Make the scripts executable (Unix-like systems):
    ```bash
    chmod +x python_aggregator.py
+   chmod +x python_aggregator_gui.py  # if using GUI
    ```
 
 ### Usage
 
-Basic usage:
+#### Command-Line Interface
 ```bash
 ./python_aggregator.py [options]
 ```
@@ -345,31 +376,101 @@ Available options:
 - `--root-dir PATH`: Root directory to start aggregation from (default: current directory)
 - `--output-file PATH`: Output file path (default: print to stdout)
 - `--exclude-dirs DIR1 DIR2 ...`: Additional directories to exclude
-- `--redact`: Enable sensitive data redaction
-- `--format FORMAT`: Output format (plaintext/markdown/html)
+- `--format FORMAT`: Output format (markdown/html)
 - `--chunk-size NUM`: Maximum lines per chunk (default: 2000, 0 to disable chunking)
+- `--track-changes`: Track changes between aggregator runs
+- `--redact`: Enable sensitive data redaction
 - `--no-extra-spacing`: Disable extra spacing in output
+
+#### Graphical Interface
+Launch the GUI for an interactive experience:
+```bash
+./python_aggregator_gui.py
+```
+
+Features:
+- Directory selection dialog
+- Format and options configuration
+- Real-time preview
+- Progress tracking
+- Status updates
+
+#### Programmatic API
+```python
+from python_aggregator import aggregate_files
+
+# Basic usage
+output = aggregate_files("path/to/project")
+
+# Advanced usage with options
+output = aggregate_files(
+    root_dir="path/to/project",
+    output_format="html",
+    track_changes=True,
+    chunk_size=1000
+)
+```
 
 ### Examples
 
-1. Aggregate all files in the current directory:
+1. Basic aggregation of current directory:
    ```bash
    ./python_aggregator.py
    ```
 
-2. Save output to a file in markdown format:
+2. Generate HTML with change tracking:
    ```bash
-   ./python_aggregator.py --format markdown --output-file project.md
+   ./python_aggregator.py \
+     --format html \
+     --output-file project.html \
+     --track-changes
    ```
 
-3. Exclude specific directories and enable redaction:
+3. Exclude directories and enable redaction:
    ```bash
-   ./python_aggregator.py --exclude-dirs build dist temp --redact
+   ./python_aggregator.py \
+     --exclude-dirs node_modules dist temp \
+     --redact \
+     --output-file safe-output.md
    ```
 
-4. Process a specific directory with custom chunk size:
+4. Process specific directory with custom chunk size:
    ```bash
-   ./python_aggregator.py --root-dir /path/to/project --chunk-size 1000
+   ./python_aggregator.py \
+     --root-dir /path/to/project \
+     --chunk-size 1000
    ```
+
+### Advanced Features
+
+#### Change Tracking
+Track modifications between runs:
+```bash
+./python_aggregator.py --track-changes
+
+# Output includes:
+Added Files:
+- src/new-feature.ts
+
+Modified Files:
+- src/main.ts
+
+Removed Files:
+- src/deprecated.ts
+```
+
+#### Incremental Processing
+- Only processes changed files
+- Maintains a cache for faster subsequent runs
+- Tracks file additions, modifications, and deletions
+
+#### Security Features
+Built-in protection for sensitive data:
+- API key detection
+- Password pattern matching
+- Private key identification
+- Environment variable detection
+- Custom pattern support
+- Configurable redaction
 
 For more detailed information about the Python script, see [python_aggregator.md](./python_aggregator.md).
