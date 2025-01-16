@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import re
+import fnmatch
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
@@ -118,7 +119,69 @@ def get_language_from_path(file_path: Path) -> str:
     }
     return language_map.get(ext, 'plaintext')
 
-def should_ignore_file(file_path: Path) -> bool:
+class GitIgnoreFilter:
+    """Filter for checking paths against .gitignore patterns."""
+    
+    def __init__(self, root_dir: Path):
+        self.root_dir = root_dir
+        self.patterns = self._load_gitignore()
+    
+    def _load_gitignore(self) -> List[str]:
+        """Load patterns from .gitignore file."""
+        gitignore_path = self.root_dir / '.gitignore'
+        patterns = []
+        
+        if gitignore_path.exists():
+            with open(gitignore_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip empty lines and comments
+                    if line and not line.startswith('#'):
+                        # Convert pattern to work with Path objects
+                        pattern = line.rstrip('/')  # Remove trailing slashes
+                        if pattern.startswith('/'):
+                            # Patterns starting with / are relative to root
+                            pattern = pattern[1:]
+                        # Handle directory names without slashes
+                        if '/' not in pattern and not pattern.startswith('*'):
+                            # Match both the directory and its contents
+                            patterns.append(f"**/{pattern}/**")
+                            patterns.append(f"**/{pattern}")
+                        else:
+                            # If pattern doesn't start with * or /, make it match anywhere in path
+                            if not pattern.startswith(('*', '/')):
+                                pattern = f"**/{pattern}"
+                            patterns.append(pattern)
+        
+        return patterns
+    
+    def should_ignore(self, path: Path) -> bool:
+        """Check if a path matches any .gitignore pattern."""
+        try:
+            # Get path relative to root directory
+            rel_path = path.relative_to(self.root_dir)
+            str_path = str(rel_path).replace('\\', '/')  # Normalize path separators
+            
+            # Also check if any parent directory matches
+            paths_to_check = [str_path]
+            parent = rel_path.parent
+            while parent != Path('.'):
+                parent_str = str(parent).replace('\\', '/')
+                paths_to_check.append(f"{parent_str}/")
+                paths_to_check.append(parent_str)  # Also check without trailing slash
+                parent = parent.parent
+            
+            for pattern in self.patterns:
+                for path_to_check in paths_to_check:
+                    if fnmatch.fnmatch(path_to_check, pattern):
+                        return True
+            
+            return False
+        except ValueError:
+            # Path is not relative to root_dir
+            return False
+
+def should_ignore_file(file_path: Path, git_ignore_filter: Optional[GitIgnoreFilter] = None) -> bool:
     """Check if a file should be ignored."""
     ignore_patterns = [
         r'node_modules',
@@ -132,7 +195,16 @@ def should_ignore_file(file_path: Path) -> bool:
     ]
     
     str_path = str(file_path)
-    return any(re.search(pattern, str_path) for pattern in ignore_patterns)
+    
+    # Check built-in ignore patterns
+    if any(re.search(pattern, str_path) for pattern in ignore_patterns):
+        return True
+    
+    # Check .gitignore patterns if filter is provided
+    if git_ignore_filter and git_ignore_filter.should_ignore(file_path):
+        return True
+    
+    return False
 
 def is_text_file(file_path: Path) -> bool:
     """Check if a file is a text file."""
@@ -408,6 +480,9 @@ def aggregate_files(
     if not root_path.is_dir():
         raise ValueError(f"'{root_dir}' is not a directory")
     
+    # Initialize GitIgnoreFilter
+    git_ignore_filter = GitIgnoreFilter(root_path)
+    
     # Add custom exclude patterns to the default ones
     exclude_patterns = set(exclude_dirs or [])
     
@@ -415,7 +490,7 @@ def aggregate_files(
     files: List[FileMetadata] = []
     for file_path in root_path.rglob('*'):
         if (file_path.is_file() and
-            not should_ignore_file(file_path) and
+            not should_ignore_file(file_path, git_ignore_filter) and
             not any(p in str(file_path) for p in exclude_patterns) and
             is_text_file(file_path)):
             try:

@@ -10,6 +10,7 @@ A standalone Python script that recursively traverses project directories and ag
 - Configurable file chunking
 - Customizable file exclusions
 - Support for various programming languages
+- Respects `.gitignore` patterns
 
 ## Requirements
 
@@ -104,6 +105,8 @@ The following patterns are ignored by default:
 - `.pyc` (Python compiled files)
 - `.pyo` (Python optimized files)
 - `.pyd` (Python dynamic libraries)
+
+Additionally, the script respects all patterns defined in your project's `.gitignore` file.
 
 ## Binary File Handling
 
