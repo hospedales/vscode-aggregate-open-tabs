@@ -147,7 +147,7 @@ Yes, your settings are preserved across updates, including:
 ## Getting Help
 
 ### Where can I report bugs?
-1. Visit our [GitHub Issues](https://github.com/yourusername/vscode-tab-aggregator/issues)
+1. Visit our [GitHub Issues](https://github.com/hospedales/vscode-aggregate-open-tabs/issues)
 2. Check if the issue is already reported
 3. Use the bug report template
 4. Provide detailed reproduction steps

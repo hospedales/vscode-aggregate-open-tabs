@@ -18,8 +18,8 @@
 ### Getting Started
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/vscode-tab-aggregator.git
-   cd vscode-tab-aggregator
+   git clone https://github.com/hospedales/vscode-aggregate-open-tabs.git
+   cd vscode-aggregate-open-tabs
    ```
 
 2. Install dependencies:
@@ -201,7 +201,7 @@ npm run test:e2e        # Run end-to-end tests
 ---
 
 ## Need Help?
-- Join our [Discord server](https://discord.gg/yourdiscord)
+- Join our [Discord server](https://discord.gg/6HpVmUHa)
 - Check existing issues
 - Ask questions in discussions
 - Read the [FAQ](./FAQ.md) 
