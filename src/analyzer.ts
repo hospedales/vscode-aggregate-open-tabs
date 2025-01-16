@@ -4,20 +4,20 @@ import { CrossReferenceTracker } from './cross-references';
 // Initialize cross-reference tracker as a singleton
 const crossRefTracker = new CrossReferenceTracker();
 
-export interface AnalyzeOptions {
-    tailored?: boolean;
-    includeKeyPoints?: boolean;
+export interface AnalyzerOptions {
     includeImports?: boolean;
     includeExports?: boolean;
     includeDependencies?: boolean;
+    includeKeyPoints?: boolean;
     includeCrossReferences?: boolean;
-    aiSummaryStyle?: 'concise' | 'detailed';
+    tailored?: boolean;
+    aiSummaryStyle?: 'minimal' | 'basic' | 'standard' | 'detailed' | 'comprehensive';
     languageMap?: Record<string, string>;
 }
 
 export async function analyzeFile(
     document: vscode.TextDocument,
-    options: AnalyzeOptions = {}
+    options: AnalyzerOptions = {}
 ): Promise<{
     frameworks: string[];
     purpose: string;
@@ -278,12 +278,17 @@ function determinePurpose(fileName: string, content: string, languageId: string)
     }
 }
 
-export function generateAISummary(content: string, languageId: string, style: 'concise' | 'detailed' = 'detailed'): { aiSummary: string; keyPoints: string[] } {
+export function generateAISummary(
+    content: string, 
+    languageId: string, 
+    style: 'minimal' | 'basic' | 'standard' | 'detailed' | 'comprehensive' = 'standard'
+): { aiSummary: string; keyPoints: string[] } {
     const lines = content.split('\n');
     const firstNonEmptyLine = lines.find(line => line.trim().length > 0) || '';
     
     // Detect file purpose based on patterns
     const purposes: string[] = [];
+    const keyPoints: string[] = [];
     
     // Enhanced React/Next.js detection with more specific component types
     if (languageId === 'typescriptreact' || languageId === 'javascriptreact') {
@@ -293,29 +298,31 @@ export function generateAISummary(content: string, languageId: string, style: 'c
             purposes.push('Server-Rendered Component');
         }
         
-        // More specific component type detection
-        if (content.includes('createContext')) purposes.push('providing Context');
-        if (content.includes('useContext')) purposes.push('consuming Context');
-        if (/layout\.[tj]sx?$/.test(firstNonEmptyLine)) purposes.push('Layout Component');
-        if (/page\.[tj]sx?$/.test(firstNonEmptyLine)) purposes.push('Page Component');
-        if (content.includes('loading')) purposes.push('with Loading State');
-        if (content.includes('error')) purposes.push('with Error Handling');
-        
-        // Detect form handling
-        if (content.includes('onSubmit') || content.includes('handleSubmit')) {
-            purposes.push('handling Form Submission');
+        // More specific component type detection - included in basic and above
+        if (style !== 'minimal') {
+            if (content.includes('createContext')) purposes.push('providing Context');
+            if (content.includes('useContext')) purposes.push('consuming Context');
+            if (/layout\.[tj]sx?$/.test(firstNonEmptyLine)) purposes.push('Layout Component');
+            if (/page\.[tj]sx?$/.test(firstNonEmptyLine)) purposes.push('Page Component');
+            if (content.includes('loading')) purposes.push('with Loading State');
+            if (content.includes('error')) purposes.push('with Error Handling');
         }
         
-        // Detect data fetching patterns
-        if (content.includes('getServerSideProps') || content.includes('getStaticProps')) {
-            purposes.push('with Server-side Data Fetching');
-        }
-        if (content.includes('useEffect') && (content.includes('fetch') || content.includes('axios'))) {
-            purposes.push('with Client-side Data Fetching');
+        // Form and data fetching detection - included in standard and above
+        if (style !== 'minimal' && style !== 'basic') {
+            if (content.includes('onSubmit') || content.includes('handleSubmit')) {
+                purposes.push('handling Form Submission');
+            }
+            if (content.includes('getServerSideProps') || content.includes('getStaticProps')) {
+                purposes.push('with Server-side Data Fetching');
+            }
+            if (content.includes('useEffect') && (content.includes('fetch') || content.includes('axios'))) {
+                purposes.push('with Client-side Data Fetching');
+            }
         }
     }
-    
-    // Enhanced API detection with specific HTTP methods and patterns
+
+    // Enhanced API detection - basic features for minimal/basic, all features for others
     if (content.includes('@api') || content.includes('api/') || content.includes('route.ts')) {
         purposes.push('API Route');
         const methods = [];
@@ -327,161 +334,188 @@ export function generateAISummary(content: string, languageId: string, style: 'c
             purposes.push(`handling ${methods.join('/')} requests`);
         }
         
-        // Detect specific API features
-        if (content.includes('middleware')) purposes.push('with Request Middleware');
-        if (content.includes('validate')) purposes.push('with Input Validation');
-        if (content.includes('cache')) purposes.push('with Response Caching');
+        // Additional API features for standard and above
+        if (style !== 'minimal' && style !== 'basic') {
+            if (content.includes('middleware')) purposes.push('with Request Middleware');
+            if (content.includes('validate')) purposes.push('with Input Validation');
+            if (content.includes('cache')) purposes.push('with Response Caching');
+        }
     }
 
-    // Enhanced testing detection with specific test types
+    // Testing detection - basic info for minimal/basic, detailed for others
     if (content.includes('test(') || content.includes('describe(')) {
         purposes.push('Test Suite');
-        if (content.includes('integration')) purposes.push('for Integration Testing');
-        if (content.includes('unit')) purposes.push('for Unit Testing');
-        if (content.includes('e2e')) purposes.push('for End-to-End Testing');
-        if (content.includes('mock') || content.includes('spy')) purposes.push('using Test Doubles');
-    }
-
-    // Enhanced type detection with specific features
-    if (content.includes('type ') || content.includes('interface ')) {
-        purposes.push('Type Definitions');
-        if (content.includes('extends')) purposes.push('with Type Extensions');
-        if (content.includes('implements')) purposes.push('with Interface Implementations');
-        if (content.includes('generic') || content.includes('<T>')) purposes.push('using Generics');
-    }
-    
-    // Generate detailed key points
-    const keyPoints: string[] = [];
-    
-    // Enhanced state management detection
-    if (content.includes('useState')) {
-        const stateVars = content.match(/useState[<(][^>)]*[>)]?\([^)]*\)/g) || [];
-        if (stateVars.length > 0) {
-            keyPoints.push(`Manages ${stateVars.length} state variable${stateVars.length !== 1 ? 's' : ''}`);
-        }
-    }
-
-    // Enhanced effect handling with dependency tracking
-    if (content.includes('useEffect')) {
-        const effects = content.match(/useEffect\(/g) || [];
-        const effectsWithDeps = content.match(/useEffect\([^[]*\[[^\]]*\]/g) || [];
-        if (effects.length > 0) {
-            keyPoints.push(`Contains ${effects.length} effect${effects.length !== 1 ? 's' : ''} (${effectsWithDeps.length} with dependencies)`);
-        }
-    }
-
-    // Enhanced API call detection with specific patterns
-    if (content.includes('fetch(') || content.includes('axios')) {
-        const fetchCalls = (content.match(/fetch\(/g) || []).length;
-        const axiosCalls = (content.match(/axios\./g) || []).length;
-        if (fetchCalls + axiosCalls > 0) {
-            const endpoints = content.match(/(fetch|axios\.get|axios\.post|axios\.put|axios\.delete)\(['"]([^'"]+)['"]/g) || [];
-            keyPoints.push(`Makes ${fetchCalls + axiosCalls} API call${fetchCalls + axiosCalls !== 1 ? 's' : ''} to ${endpoints.length} unique endpoint${endpoints.length !== 1 ? 's' : ''}`);
-        }
-    }
-
-    // Enhanced database operations detection
-    if (content.includes('createClient') || content.includes('prisma') || content.includes('supabase')) {
-        const operations = [];
-        if (content.includes('select') || content.includes('findMany') || content.includes('findFirst')) operations.push('queries');
-        if (content.includes('insert') || content.includes('create')) operations.push('creates');
-        if (content.includes('update') || content.includes('upsert')) operations.push('updates');
-        if (content.includes('delete')) operations.push('deletes');
-        
-        if (operations.length > 0) {
-            keyPoints.push(`Performs database operations: ${operations.join(', ')}`);
-        }
-    }
-
-    // Enhanced security and environment detection
-    if (content.includes('env.')) {
-        const envVars = content.match(/process\.env\.[A-Z_]+/g) || [];
-        if (envVars.length > 0) {
-            keyPoints.push(`Uses ${envVars.length} environment variable${envVars.length !== 1 ? 's' : ''}`);
-        }
-    }
-    
-    if (content.includes('auth') || content.includes('session')) {
-        const authFeatures = [];
-        if (content.includes('login') || content.includes('signIn')) authFeatures.push('authentication');
-        if (content.includes('role') || content.includes('permission')) authFeatures.push('authorization');
-        if (authFeatures.length > 0) {
-            keyPoints.push(`Implements ${authFeatures.join(' and ')}`);
-        }
-    }
-
-    // Enhanced error handling detection
-    if (content.includes('try {')) {
-        const tryCatches = (content.match(/try\s*{/g) || []).length;
-        const customErrors = content.includes('throw new Error') || content.includes('new CustomError');
-        if (tryCatches > 0) {
-            keyPoints.push(`Contains ${tryCatches} error handling block${tryCatches !== 1 ? 's' : ''}${customErrors ? ' with custom error handling' : ''}`);
-        }
-    }
-
-    // Enhanced TypeScript feature detection
-    if (content.includes('export type') || content.includes('export interface')) {
-        const typeExports = (content.match(/export\s+(type|interface)/g) || []).length;
-        const typeImports = (content.match(/import\s+type/g) || []).length;
-        if (typeExports > 0 || typeImports > 0) {
-            keyPoints.push(`Defines ${typeExports} type${typeExports !== 1 ? 's' : ''} and imports ${typeImports} type${typeImports !== 1 ? 's' : ''}`);
-        }
-    }
-
-    // Enhanced performance optimization detection
-    if (content.includes('useMemo') || content.includes('useCallback')) {
-        const memos = (content.match(/useMemo\(/g) || []).length;
-        const callbacks = (content.match(/useCallback\(/g) || []).length;
-        if (memos + callbacks > 0) {
-            keyPoints.push(`Uses ${memos + callbacks} performance optimization${memos + callbacks !== 1 ? 's' : ''} (${memos} memoized values, ${callbacks} callbacks)`);
-        }
-    }
-
-    // Enhanced UI/UX feature detection
-    if (content.includes('className=')) {
-        const features = [];
-        if (content.includes('dark:')) features.push('dark mode support');
-        if (content.includes('md:') || content.includes('lg:')) features.push('responsive design');
-        if (content.includes('animate-') || content.includes('transition-')) features.push('animations');
-        if (content.includes('hover:') || content.includes('focus:')) features.push('interactive states');
-        if (features.length > 0) {
-            if (style === 'detailed') {
-                features.forEach(feature => keyPoints.push(`Implements ${feature}`));
-            } else {
-                keyPoints.push(`Includes ${features.join(', ')}`);
+        if (style !== 'minimal') {
+            if (content.includes('integration')) purposes.push('for Integration Testing');
+            if (content.includes('unit')) purposes.push('for Unit Testing');
+            if (content.includes('e2e')) purposes.push('for End-to-End Testing');
+            if (style !== 'basic' && content.includes('mock') || content.includes('spy')) {
+                purposes.push('using Test Doubles');
             }
         }
     }
 
-    // Generate a summary based on style
+    // Type definitions - basic info for all levels, details for standard+
+    if (content.includes('type ') || content.includes('interface ')) {
+        purposes.push('Type Definitions');
+        if (style !== 'minimal') {
+            if (content.includes('extends')) purposes.push('with Type Extensions');
+            if (content.includes('implements')) purposes.push('with Interface Implementations');
+            if (style !== 'basic' && (content.includes('generic') || content.includes('<T>'))) {
+                purposes.push('using Generics');
+            }
+        }
+    }
+
+    // Key points generation based on depth level
+    if (style !== 'minimal') {
+        // State management detection - basic info for basic, detailed for others
+        if (content.includes('useState')) {
+            const stateVars = content.match(/useState[<(][^>)]*[>)]?\([^)]*\)/g) || [];
+            if (stateVars.length > 0) {
+                keyPoints.push(`Manages ${stateVars.length} state variable${stateVars.length !== 1 ? 's' : ''}`);
+            }
+        }
+
+        // Effect handling - standard and above
+        if (style !== 'basic' && content.includes('useEffect')) {
+            const effects = content.match(/useEffect\(/g) || [];
+            const effectsWithDeps = content.match(/useEffect\([^[]*\[[^\]]*\]/g) || [];
+            if (effects.length > 0) {
+                keyPoints.push(`Contains ${effects.length} effect${effects.length !== 1 ? 's' : ''} (${effectsWithDeps.length} with dependencies)`);
+            }
+        }
+
+        // API calls - standard and above
+        if (style !== 'basic' && (content.includes('fetch(') || content.includes('axios'))) {
+            const fetchCalls = (content.match(/fetch\(/g) || []).length;
+            const axiosCalls = (content.match(/axios\./g) || []).length;
+            if (fetchCalls + axiosCalls > 0) {
+                const endpoints = content.match(/(fetch|axios\.get|axios\.post|axios\.put|axios\.delete)\(['"]([^'"]+)['"]/g) || [];
+                keyPoints.push(`Makes ${fetchCalls + axiosCalls} API call${fetchCalls + axiosCalls !== 1 ? 's' : ''} to ${endpoints.length} unique endpoint${endpoints.length !== 1 ? 's' : ''}`);
+            }
+        }
+
+        // Database operations - detailed and comprehensive only
+        if ((style === 'detailed' || style === 'comprehensive') && 
+            (content.includes('createClient') || content.includes('prisma') || content.includes('supabase'))) {
+            const operations = [];
+            if (content.includes('select') || content.includes('findMany') || content.includes('findFirst')) operations.push('queries');
+            if (content.includes('insert') || content.includes('create')) operations.push('creates');
+            if (content.includes('update') || content.includes('upsert')) operations.push('updates');
+            if (content.includes('delete')) operations.push('deletes');
+            
+            if (operations.length > 0) {
+                keyPoints.push(`Performs database operations: ${operations.join(', ')}`);
+            }
+        }
+
+        // Security and environment - detailed and comprehensive only
+        if ((style === 'detailed' || style === 'comprehensive') && content.includes('env.')) {
+            const envVars = content.match(/process\.env\.[A-Z_]+/g) || [];
+            if (envVars.length > 0) {
+                keyPoints.push(`Uses ${envVars.length} environment variable${envVars.length !== 1 ? 's' : ''}`);
+            }
+        }
+
+        // Authentication - detailed and comprehensive only
+        if ((style === 'detailed' || style === 'comprehensive') && 
+            (content.includes('auth') || content.includes('session'))) {
+            const authFeatures = [];
+            if (content.includes('login') || content.includes('signIn')) authFeatures.push('authentication');
+            if (content.includes('role') || content.includes('permission')) authFeatures.push('authorization');
+            if (authFeatures.length > 0) {
+                keyPoints.push(`Implements ${authFeatures.join(' and ')}`);
+            }
+        }
+
+        // Error handling - comprehensive only
+        if (style === 'comprehensive' && content.includes('try {')) {
+            const tryCatches = (content.match(/try\s*{/g) || []).length;
+            const customErrors = content.includes('throw new Error') || content.includes('new CustomError');
+            if (tryCatches > 0) {
+                keyPoints.push(`Contains ${tryCatches} error handling block${tryCatches !== 1 ? 's' : ''}${customErrors ? ' with custom error handling' : ''}`);
+            }
+        }
+
+        // TypeScript features - comprehensive only
+        if (style === 'comprehensive' && (content.includes('export type') || content.includes('export interface'))) {
+            const typeExports = (content.match(/export\s+(type|interface)/g) || []).length;
+            const typeImports = (content.match(/import\s+type/g) || []).length;
+            if (typeExports > 0 || typeImports > 0) {
+                keyPoints.push(`Defines ${typeExports} type${typeExports !== 1 ? 's' : ''} and imports ${typeImports} type${typeImports !== 1 ? 's' : ''}`);
+            }
+        }
+
+        // Performance optimizations - comprehensive only
+        if (style === 'comprehensive' && (content.includes('useMemo') || content.includes('useCallback'))) {
+            const memos = (content.match(/useMemo\(/g) || []).length;
+            const callbacks = (content.match(/useCallback\(/g) || []).length;
+            if (memos + callbacks > 0) {
+                keyPoints.push(`Uses ${memos + callbacks} performance optimization${memos + callbacks !== 1 ? 's' : ''} (${memos} memoized values, ${callbacks} callbacks)`);
+            }
+        }
+
+        // UI/UX features - based on depth level
+        if (content.includes('className=')) {
+            const features = [];
+            if (content.includes('dark:')) features.push('dark mode support');
+            if (content.includes('md:') || content.includes('lg:')) features.push('responsive design');
+            if (style !== 'basic') {
+                if (content.includes('animate-') || content.includes('transition-')) features.push('animations');
+                if (content.includes('hover:') || content.includes('focus:')) features.push('interactive states');
+            }
+            if (features.length > 0) {
+                if (style === 'comprehensive') {
+                    features.forEach(feature => keyPoints.push(`Implements ${feature}`));
+                } else {
+                    keyPoints.push(`Includes ${features.join(', ')}`);
+                }
+            }
+        }
+    }
+
+    // Generate summary based on style
     let summary = purposes.length > 0 
         ? purposes.join(' ')
         : 'General purpose file';
 
-    if (style === 'detailed') {
-        // Add key functionality to summary
+    // Add key functionality to summary based on depth level
+    if (style !== 'minimal') {
         const keyFunctionality = keyPoints
-            .filter(point => !point.startsWith('-')) // Filter out sub-points
-            .map(point => point.toLowerCase())
-            .join(', ');
-
-        if (keyFunctionality) {
-            summary += ` that ${keyFunctionality}`;
-        }
-    } else {
-        // For concise style, keep only the main purpose and most important features
-        const mainFeatures = keyPoints
             .filter(point => !point.startsWith('-'))
-            .slice(0, 2) // Take only the first two main features
             .map(point => point.toLowerCase());
 
-        if (mainFeatures.length > 0) {
-            summary += ` with ${mainFeatures.join(' and ')}`;
+        if (style === 'comprehensive') {
+            // Include all key points in detail
+            if (keyFunctionality.length > 0) {
+                summary += ' that:\n- ' + keyFunctionality.join('\n- ');
+            }
+        } else if (style === 'detailed') {
+            // Include all key points in a single paragraph
+            if (keyFunctionality.length > 0) {
+                summary += ' that ' + keyFunctionality.join(', ');
+            }
+        } else if (style === 'standard') {
+            // Include up to 3 main features
+            const mainFeatures = keyFunctionality.slice(0, 3);
+            if (mainFeatures.length > 0) {
+                summary += ' with ' + mainFeatures.join(', ');
+            }
+        } else if (style === 'basic') {
+            // Include only the most important feature
+            if (keyFunctionality.length > 0) {
+                summary += ' with ' + keyFunctionality[0];
+            }
         }
     }
     
     return {
         aiSummary: summary,
-        keyPoints: style === 'detailed' ? keyPoints : keyPoints.filter(point => !point.startsWith('-'))
+        keyPoints: style === 'minimal' ? [] : 
+                  style === 'basic' ? keyPoints.slice(0, 2) :
+                  style === 'standard' ? keyPoints.slice(0, 5) :
+                  style === 'detailed' ? keyPoints.slice(0, 10) :
+                  keyPoints // comprehensive includes all points
     };
 } 

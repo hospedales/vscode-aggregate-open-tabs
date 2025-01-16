@@ -275,11 +275,14 @@
         "aggregateOpenTabs.aiSummaryStyle": {
           "type": "string",
           "enum": [
-            "concise",
-            "detailed"
+            "minimal",
+            "basic",
+            "standard",
+            "detailed",
+            "comprehensive"
           ],
-          "default": "concise",
-          "description": "Style of AI-generated summaries (concise or detailed)."
+          "default": "standard",
+          "description": "Depth of AI-generated summaries (minimal: purpose only, basic: purpose + main features, standard: balanced analysis, detailed: full analysis, comprehensive: exhaustive analysis)."
         },
         "aggregateOpenTabs.includeImports": {
           "type": "boolean",
@@ -295,6 +298,31 @@
           "type": "boolean",
           "default": true,
           "description": "Include cross-references between files in the output (imports, exports, dependencies)."
+        },
+        "aggregateOpenTabs.preview.showSourceView": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show source view alongside the preview"
+        },
+        "aggregateOpenTabs.preview.syntaxHighlighting": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable syntax highlighting in the preview"
+        },
+        "aggregateOpenTabs.preview.collapsibleSections": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable collapsible sections in the preview"
+        },
+        "aggregateOpenTabs.preview.searchEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable search functionality in the preview"
+        },
+        "aggregateOpenTabs.preview.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh preview when files change"
         }
       }
     }

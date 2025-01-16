@@ -1,0 +1,206 @@
+:root {
+    --split-gutter-size: 4px;
+    --toolbar-height: 40px;
+    --search-height: 40px;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size);
+    color: var(--vscode-editor-foreground);
+    background-color: var(--vscode-editor-background);
+    display: flex;
+    flex-direction: column;
+}
+
+.toolbar {
+    height: var(--toolbar-height);
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    background: var(--vscode-editor-background);
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.search-bar {
+    height: var(--search-height);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px;
+    background: var(--vscode-editor-background);
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.search-input {
+    flex: 1;
+    height: 24px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    padding: 0 8px;
+    border-radius: 2px;
+}
+
+.search-input:focus {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+}
+
+.search-count {
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+}
+
+.split-view {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
+
+.source-view, .preview-view {
+    flex: 1;
+    overflow: auto;
+    padding: 20px;
+}
+
+.gutter {
+    width: var(--split-gutter-size);
+    background: var(--vscode-panel-border);
+    cursor: col-resize;
+}
+
+.source-view {
+    font-family: var(--vscode-editor-font-family);
+    white-space: pre;
+}
+
+.preview-view {
+    font-family: var(--vscode-editor-font-family);
+}
+
+button {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    padding: 4px 8px;
+    cursor: pointer;
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+}
+
+button:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    padding: 15px;
+    background-color: var(--vscode-textBlockQuote-background);
+    border-radius: 3px;
+}
+
+.format-indicator {
+    padding: 4px 8px;
+    background-color: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    border-radius: 3px;
+    font-size: 12px;
+}
+
+/* Markdown specific styles */
+h1, h2, h3 { 
+    color: var(--vscode-editor-foreground);
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+code { 
+    background-color: var(--vscode-textBlockQuote-background);
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+details { 
+    margin: 1em 0;
+    padding: 0.5em;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+}
+
+summary { 
+    cursor: pointer;
+    font-weight: 600;
+    padding: 0.5em;
+    margin: -0.5em;
+}
+
+summary:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+/* HTML specific styles */
+.file-section { 
+    margin: 2em 0;
+    padding: 1em;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+}
+
+.file-title { 
+    color: var(--vscode-editor-foreground);
+    font-size: 1.2em;
+    font-weight: 600;
+    margin-bottom: 1em;
+}
+
+.file-metadata { 
+    margin: 1em 0;
+    padding: 1em;
+    background-color: var(--vscode-textBlockQuote-background);
+    border-radius: 3px;
+}
+
+.ai-analysis { 
+    margin: 1em 0;
+    padding: 1em;
+    background-color: var(--vscode-textBlockQuote-background);
+    border-radius: 3px;
+}
+
+.code-block { 
+    margin: 1em 0;
+}
+
+/* Search highlight */
+.match-highlight {
+    background-color: var(--vscode-editor-findMatchHighlightBackground);
+    border-radius: 2px;
+}
+
+/* Transitions */
+.source-view, .gutter, .search-bar {
+    transition: all 0.3s ease;
+}
+
+details[open] {
+    animation: details-show 0.3s ease-in-out;
+}
+
+@keyframes details-show {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+} 

@@ -13,6 +13,17 @@ let treeDataProvider: AggregateTreeProvider;
 let storageManager: StorageManager;
 let previewPanel: PreviewPanel | undefined;
 
+interface PreviewMessage {
+    command: 'refresh' | 'requestSource';
+}
+
+interface PreviewResponse {
+    command: 'updateSource';
+    content: string;
+}
+
+type AISummaryStyle = 'minimal' | 'basic' | 'standard' | 'detailed' | 'comprehensive';
+
 class PreviewPanel {
     private static readonly viewType = 'aggregatePreview';
     private readonly _panel: vscode.WebviewPanel;
@@ -22,6 +33,7 @@ class PreviewPanel {
     private _lastProcessedFiles: Set<string> = new Set();
     private _cachedMetadata: Map<string, any> = new Map();
     private _processingQueue: Promise<void> = Promise.resolve();
+    private _currentSourceContent: string = '';
 
     constructor(extensionUri: vscode.Uri) {
         this._extensionUri = extensionUri;
@@ -39,10 +51,9 @@ class PreviewPanel {
         );
 
         // Initial content
-        this._panel.webview.html = this._getWebviewContent();
+        this._panel.webview.html = this._getWebviewContent('');
 
         // Listen for when the panel is disposed
-        // This happens when the user closes the panel or when the panel is closed programmatically
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
         // Force refresh when the panel becomes visible
@@ -54,10 +65,13 @@ class PreviewPanel {
 
         // Handle messages from the webview
         this._panel.webview.onDidReceiveMessage(
-            message => {
+            (message: PreviewMessage) => {
                 switch (message.command) {
                     case 'refresh':
                         this.debouncedUpdate();
+                        return;
+                    case 'requestSource':
+                        this.updateSourceContent();
                         return;
                 }
             },
@@ -65,15 +79,32 @@ class PreviewPanel {
             this._disposables
         );
 
-        // Update when files change
-        vscode.workspace.onDidChangeTextDocument(
-            () => this.debouncedUpdate(),
-            null,
-            this._disposables
-        );
+        // Listen for text document changes
+        vscode.workspace.onDidChangeTextDocument(event => {
+            if (event.document === vscode.window.activeTextEditor?.document) {
+                this.debouncedUpdate();
+            }
+        }, null, this._disposables);
+
+        // Listen for active editor changes
+        vscode.window.onDidChangeActiveTextEditor(() => {
+            this.debouncedUpdate();
+        }, null, this._disposables);
     }
 
-    private async debouncedUpdate(forceRefresh: boolean = true) {
+    private async updateSourceContent(): Promise<void> {
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            this._currentSourceContent = editor.document.getText();
+            const response: PreviewResponse = {
+                command: 'updateSource',
+                content: this._currentSourceContent
+            };
+            await this._panel.webview.postMessage(response);
+        }
+    }
+
+    private async debouncedUpdate(forceRefresh: boolean = false): Promise<void> {
         if (this._updateTimeout) {
             clearTimeout(this._updateTimeout);
         }
@@ -85,7 +116,7 @@ class PreviewPanel {
                     const errorMessage = error instanceof Error ? error.message : String(error);
                     vscode.window.showErrorMessage(`Error updating preview: ${errorMessage}`);
                 });
-        }, 500); // Increased debounce time for better performance
+        }, 500);
     }
 
     public static createOrShow(extensionUri: vscode.Uri): void {
@@ -93,6 +124,23 @@ class PreviewPanel {
             previewPanel._panel.reveal(vscode.ViewColumn.Beside);
         } else {
             previewPanel = new PreviewPanel(extensionUri);
+        }
+    }
+
+    public dispose(): void {
+        if (this._updateTimeout) {
+            clearTimeout(this._updateTimeout);
+        }
+        previewPanel = undefined;
+
+        // Clean up our resources
+        this._panel.dispose();
+
+        while (this._disposables.length) {
+            const x = this._disposables.pop();
+            if (x) {
+                x.dispose();
+            }
         }
     }
 
@@ -151,7 +199,7 @@ class PreviewPanel {
                                     includeImports: config.get<boolean>('includeImports', true),
                                     includeExports: config.get<boolean>('includeExports', true),
                                     includeDependencies: config.get<boolean>('includeDependencies', true),
-                                    aiSummaryStyle: config.get<'concise' | 'detailed'>('aiSummaryStyle', 'concise'),
+                                    aiSummaryStyle: config.get<AISummaryStyle>('aiSummaryStyle', 'standard'),
                                     languageMap: config.get<Record<string, string>>('codeFenceLanguageMap', {})
                                 });
                                 metadata.analysis = analysis;
@@ -193,7 +241,7 @@ class PreviewPanel {
                     includeImports: config.get<boolean>('includeImports', true),
                     includeExports: config.get<boolean>('includeExports', true),
                     includeDependencies: config.get<boolean>('includeDependencies', true),
-                    aiSummaryStyle: config.get<'concise' | 'detailed'>('aiSummaryStyle', 'concise'),
+                    aiSummaryStyle: config.get<AISummaryStyle>('aiSummaryStyle', 'standard'),
                     useCodeFences: config.get<boolean>('useCodeFences', true)
                 }
             );
@@ -209,120 +257,83 @@ class PreviewPanel {
         }
     }
 
-    private _getWebviewContent(content: string = '') {
+    private _getWebviewContent(content: string = ''): string {
         const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
         const outputFormat = config.get<string>('outputFormat', 'markdown');
+        const scriptUri = this._panel.webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'preview.js')
+        );
+        const styleUri = this._panel.webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'preview.css')
+        );
+        const highlightJsUri = this._panel.webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'highlight.min.js')
+        );
+        const highlightCssUri = this._panel.webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'vs2015.min.css')
+        );
+        const splitJsUri = this._panel.webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'split.min.js')
+        );
+        
+        const nonce = getNonce();
         
         return `<!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this._panel.webview.cspSource} 'unsafe-inline'; script-src ${this._panel.webview.cspSource} 'nonce-${nonce}'; img-src ${this._panel.webview.cspSource} https:;">
             <title>Aggregation Preview</title>
-            <style>
-                body {
-                    padding: 20px;
-                    line-height: 1.5;
-                    font-family: var(--vscode-editor-font-family);
-                    font-size: var(--vscode-editor-font-size);
-                    color: var(--vscode-editor-foreground);
-                    background-color: var(--vscode-editor-background);
-                }
-                .toolbar {
-                    position: fixed;
-                    top: 10px;
-                    right: 10px;
-                    z-index: 1000;
-                    display: flex;
-                    gap: 8px;
-                    background: var(--vscode-editor-background);
-                    padding: 8px;
-                    border-radius: 3px;
-                    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-                }
-                button {
-                    background-color: var(--vscode-button-background);
-                    color: var(--vscode-button-foreground);
-                    border: none;
-                    padding: 8px 12px;
-                    cursor: pointer;
-                    border-radius: 3px;
-                    display: flex;
-                    align-items: center;
-                    gap: 4px;
-                }
-                button:hover {
-                    background-color: var(--vscode-button-hoverBackground);
-                }
-                pre {
-                    white-space: pre-wrap;
-                    word-wrap: break-word;
-                    padding: 15px;
-                    background-color: var(--vscode-textBlockQuote-background);
-                    border-radius: 3px;
-                }
-                .format-indicator {
-                    position: fixed;
-                    top: 10px;
-                    left: 10px;
-                    padding: 4px 8px;
-                    background-color: var(--vscode-badge-background);
-                    color: var(--vscode-badge-foreground);
-                    border-radius: 3px;
-                    font-size: 12px;
-                }
-                ${outputFormat === 'markdown' ? `
-                h1, h2, h3 { color: var(--vscode-editor-foreground); }
-                code { background-color: var(--vscode-textBlockQuote-background); padding: 2px 4px; border-radius: 3px; }
-                details { margin: 1em 0; }
-                summary { cursor: pointer; }
-                ` : ''}
-                ${outputFormat === 'html' ? `
-                .file-section { margin: 2em 0; }
-                .file-title { color: var(--vscode-editor-foreground); }
-                .file-metadata { margin: 1em 0; }
-                .ai-analysis { margin: 1em 0; }
-                .code-block { margin: 1em 0; }
-                ` : ''}
-            </style>
+            <link href="${styleUri}" rel="stylesheet">
+            <link href="${highlightCssUri}" rel="stylesheet">
         </head>
         <body>
-            <div class="format-indicator">${outputFormat.toUpperCase()}</div>
             <div class="toolbar">
+                <span class="format-indicator">${outputFormat.toUpperCase()}</span>
+                <button onclick="toggleSplitView()">
+                    <span>⚡</span>
+                    Toggle Split View
+                </button>
+                <button onclick="toggleSearch()">
+                    <span>🔍</span>
+                    Toggle Search
+                </button>
+                <button onclick="toggleCollapsible()">
+                    <span>▼</span>
+                    Toggle Sections
+                </button>
                 <button onclick="refresh()">
                     <span>⟳</span>
                     Refresh
                 </button>
             </div>
-            ${outputFormat === 'markdown' || outputFormat === 'html' 
-                ? content 
-                : `<pre>${content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`}
-            <script>
-                const vscode = acquireVsCodeApi();
-                function refresh() {
-                    vscode.postMessage({ command: 'refresh' });
-                }
-            </script>
+            <div class="search-bar" style="display: none;">
+                <input type="text" class="search-input" placeholder="Search content..." onkeyup="searchContent(this.value)">
+                <span class="search-count"></span>
+            </div>
+            <div class="split-view">
+                <div class="source-view" style="display: none;"></div>
+                <div class="gutter" style="display: none;"></div>
+                <div class="preview-view">
+                    ${content}
+                </div>
+            </div>
+            <script nonce="${nonce}" src="${splitJsUri}"></script>
+            <script nonce="${nonce}" src="${highlightJsUri}"></script>
+            <script nonce="${nonce}" src="${scriptUri}"></script>
         </body>
         </html>`;
     }
+}
 
-    public dispose() {
-        if (this._updateTimeout) {
-            clearTimeout(this._updateTimeout);
-        }
-        previewPanel = undefined;
-
-        // Clean up our resources
-        this._panel.dispose();
-
-        while (this._disposables.length) {
-            const x = this._disposables.pop();
-            if (x) {
-                x.dispose();
-            }
-        }
+function getNonce() {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
+    return text;
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -370,7 +381,7 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
         const includeImports = config.get<boolean>('includeImports', true);
         const includeExports = config.get<boolean>('includeExports', true);
         const includeDependencies = config.get<boolean>('includeDependencies', true);
-        const aiSummaryStyle = config.get<'concise' | 'detailed'>('aiSummaryStyle', 'concise');
+        const aiSummaryStyle = config.get<AISummaryStyle>('aiSummaryStyle', 'standard');
         const chunkSeparatorStyle = config.get<'double' | 'single' | 'minimal'>('chunkSeparatorStyle', 'double');
         const codeFenceLanguageMap = config.get<Record<string, string>>('codeFenceLanguageMap', {});
 
@@ -619,7 +630,7 @@ async function copyAggregatedContent(): Promise<void> {
                 includeImports: config.get<boolean>('includeImports', true),
                 includeExports: config.get<boolean>('includeExports', true),
                 includeDependencies: config.get<boolean>('includeDependencies', true),
-                aiSummaryStyle: config.get<'concise' | 'detailed'>('aiSummaryStyle', 'concise'),
+                aiSummaryStyle: config.get<AISummaryStyle>('aiSummaryStyle', 'standard'),
                 useCodeFences: config.get<boolean>('useCodeFences', true)
             }
         );

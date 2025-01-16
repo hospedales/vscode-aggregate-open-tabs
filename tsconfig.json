@@ -5,7 +5,8 @@
     "outDir": "out",
     "lib": [
       "ES2020",
-      "DOM"
+      "DOM",
+      "DOM.Iterable"
     ],
     "sourceMap": true,
     "rootDir": "src",
@@ -20,10 +21,19 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "moduleResolution": "node",
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "useDefineForClassFields": true,
+    "isolatedModules": true
   },
+  "include": [
+    "src/**/*"
+  ],
   "exclude": [
     "node_modules",
-    ".vscode-test"
+    ".vscode-test",
+    "out"
   ]
 } 
