@@ -13,6 +13,7 @@
   - Combine all open tabs (or only a selected subset) into a single document.  
   - Automatically chunk long files for improved readability.  
   - Generate AI-powered summaries, lists of imports/exports, dependencies, and more.
+  - **NEW**: Python script for project-wide file aggregation (see [Python Aggregator](#python-aggregator)).
 
 - **File Analysis & Summaries**  
   - Optional AI-based analysis of each file (framework detection, purpose, imports, exports, dependencies).  
@@ -168,3 +169,22 @@ See the [LICENSE](./LICENSE) file for details.
 **Enjoy using Aggregate Open Tabs!** If you have questions, suggestions, or issues, please open a GitHub Issue or submit a PR.
 
 Happy coding!
+
+## Python Aggregator
+
+A standalone Python script is now available for project-wide file aggregation. This complements the VS Code extension by providing a command-line interface that can process entire project directories, not just open tabs.
+
+### Key Features
+- Recursive directory traversal
+- Multiple output formats (plaintext, markdown, HTML)
+- Sensitive data detection and redaction
+- Configurable file chunking
+- Customizable file exclusions
+- No external dependencies required
+
+### Usage
+```bash
+./python_aggregator.py [options]
+```
+
+For detailed information, see [python_aggregator.md](./python_aggregator.md).
