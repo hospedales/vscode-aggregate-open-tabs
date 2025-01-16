@@ -350,6 +350,7 @@ def is_text_file(file_path: Path) -> bool:
         '.svgz', '.eot',  # Compressed web fonts
         '.msi', '.app',  # Installers
         '.pdb', '.ilk',  # Debug files
+        '.vsix',  # VS Code extension packages
     }
     return file_path.suffix.lower() not in binary_extensions
 
