@@ -323,7 +323,7 @@ A standalone Python script is now available for project-wide file aggregation. T
   - Framework and dependency detection
   - Cross-file reference tracking
   - Directory structure analysis
-  - Purpose detection for files and directories
+  - Purpose detection for source code files
   - Language-specific parsing and analysis
 
 - **Multiple Interfaces**
@@ -342,6 +342,11 @@ A standalone Python script is now available for project-wide file aggregation. T
   - Configurable redaction options
   - Custom pattern support
   - Respects `.gitignore` patterns
+
+### File Type Support
+- **Fully Supported**: Python, JavaScript/TypeScript, Java, C/C++, Go, Ruby, PHP, Shell scripts, Configuration files
+- **Partially Supported**: Markdown, HTML/CSS, Plain text, XML/SVG, Environment files
+- **Unsupported**: Binary files, Images, Audio/video, Compiled files, Archives
 
 ### Requirements
 - Python 3.7 or higher
@@ -381,6 +386,15 @@ Available options:
 - `--track-changes`: Track changes between aggregator runs
 - `--redact`: Enable sensitive data redaction
 - `--no-extra-spacing`: Disable extra spacing in output
+- `--ignore-errors`: Continue processing on non-critical errors
+- `--verbose`: Enable detailed logging output
+
+#### Error Handling
+The script includes robust error handling:
+- **Critical Errors** (stop processing): Invalid arguments, permission issues, memory errors
+- **Non-Critical Errors** (warning only): Purpose detection failures, unsupported files, encoding issues
+- Use `--ignore-errors` to continue processing on non-critical errors
+- Use `--verbose` for detailed error information
 
 #### Graphical Interface
 Launch the GUI for an interactive experience:

@@ -630,84 +630,89 @@ def get_language_from_path(file_path: Path) -> str:
     }
     return language_map.get(ext, 'plaintext')
 
-def generate_file_purpose(file_path: Path) -> str:
-    """Generate a purpose description for a file."""
+def generate_file_purpose(file_path: Path) -> Optional[str]:
+    """Generate a purpose description for a file based on its content and type."""
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-            
-        # First check for file-level comment
-        first_line = content.strip().split('\n')[0]
-        if first_line.startswith('#'):
-            return first_line.lstrip('#').strip()
-            
-        tree = ast.parse(content)
+        content = file_path.read_text()
+        ext = file_path.suffix.lower()
         
-        # Try to get module docstring
-        module_doc = ast.get_docstring(tree)
-        if module_doc:
-            # Take first line/paragraph of docstring
-            first_para = module_doc.split('\n\n')[0].strip()
-            return first_para
-            
-        # For test files, check test class/function docstrings
-        if file_path.name.startswith('test_') or file_path.name.endswith('_test.py'):
-            return "This file is for testing purposes"
-            
-        # Analyze content
-        classes = []
-        functions = []
-        imports = []
+        # Handle special files first
+        if file_path.name == '.gitignore':
+            return "Git ignore patterns for version control"
+        elif file_path.name == 'LICENSE':
+            return "Project license information"
+        elif file_path.name == 'requirements.txt':
+            return "Python package dependencies"
+        elif file_path.name == 'package.json':
+            return "Node.js package configuration and dependencies"
+        elif file_path.name.endswith('.vscodeignore'):
+            return "VSCode extension packaging ignore patterns"
         
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                classes.append(node.name)
-            elif isinstance(node, ast.FunctionDef):
-                if not node.name.startswith('_'):
-                    functions.append(node.name)
-            elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                if isinstance(node, ast.Import):
-                    imports.extend(n.name for n in node.names)
-                else:
-                    imports.append(node.module or '')
-        
-        # Check if these are utility functions
-        utility_indicators = {'util', 'helper', 'format', 'convert', 'parse', 'validate', 'check', 'get', 'set'}
-        has_utility_funcs = any(any(ind in func.lower() for ind in utility_indicators) for func in functions)
-        
-        # Generate purpose based on content
-        if has_utility_funcs:
-            if len(functions) == 1:
-                return "Provides utility functions"
-            else:
-                return f"Provides utility functions including {', '.join(functions[:3])}"
-        elif classes:
-            if len(classes) == 1:
-                return f"Defines the {classes[0]} class"
-            else:
-                return f"Defines multiple classes: {', '.join(classes[:3])}"
-        elif functions:
-            if len(functions) == 1:
-                return f"Implements the {functions[0]} function"
-            else:
-                return f"Implements multiple functions including {', '.join(functions[:3])}"
-        elif imports and not (classes or functions):
-            return "Module that re-exports functionality from other modules"
+        # Handle by file extension
+        if ext in ['.py', '.pyw']:
+            # Use AST for Python files
+            tree = ast.parse(content)
+            docstring = ast.get_docstring(tree)
+            if docstring:
+                return docstring.split('\n')[0]
             
-        # Fallback to filename-based purpose
-        name = file_path.stem
-        if name == '__init__':
-            return "Package initialization module"
-        elif name == '__main__':
-            return "Main entry point module"
-        else:
-            # Convert snake_case to words
-            words = name.replace('_', ' ').title()
-            return f"Module for {words}"
-            
+        elif ext in ['.ts', '.js', '.tsx', '.jsx']:
+            # Handle TypeScript/JavaScript files
+            lines = content.split('\n')
+            for line in lines[:10]:  # Check first 10 lines
+                # Look for JSDoc or single-line comments
+                if '/**' in line or '/*' in line:
+                    comment_end = next((i for i, l in enumerate(lines) if '*/' in l), -1)
+                    if comment_end != -1:
+                        comment = ' '.join(lines[lines.index(line):comment_end+1])
+                        return comment.replace('/**', '').replace('*/', '').replace('*', '').strip()
+                elif '//' in line:
+                    comment = line.split('//', 1)[1].strip()
+                    if comment:
+                        return comment
+
+        elif ext in ['.css', '.scss', '.less']:
+            # Handle CSS files
+            lines = content.split('\n')
+            for line in lines[:10]:
+                if '/*' in line:
+                    comment_end = next((i for i, l in enumerate(lines) if '*/' in l), -1)
+                    if comment_end != -1:
+                        comment = ' '.join(lines[lines.index(line):comment_end+1])
+                        return comment.replace('/*', '').replace('*/', '').replace('*', '').strip()
+
+        elif ext == '.md':
+            # Handle Markdown files
+            lines = content.split('\n')
+            for line in lines[:3]:  # Check first 3 lines
+                if line.startswith('# '):
+                    return line[2:].strip()
+
+        elif ext in ['.html', '.htm']:
+            # Handle HTML files
+            if '<!--' in content:
+                comment_end = content.find('-->')
+                if comment_end != -1:
+                    comment = content[content.find('<!--')+4:comment_end]
+                    return comment.strip()
+
+        elif ext == '.svg':
+            return "Vector graphics image file"
+
+        # Default handling for other text files
+        lines = content.split('\n')
+        for line in lines[:10]:
+            line = line.strip()
+            if line and not line.startswith(('#', '//', '/*', '*', '<!', '<?', '}')):
+                return f"Text file starting with: {line[:50]}..."
+
+        return f"{ext[1:].upper()} file"  # Default to file extension if no purpose found
+
+    except UnicodeDecodeError:
+        return "Binary file"
     except Exception as e:
-        logger.warning(f"Error generating purpose for {file_path}: {str(e)}")
-        return "Purpose could not be determined"
+        logger.debug(f"Error generating purpose for {file_path}: {str(e)}")
+        return None
 
 def extract_dependencies(file_path: Path) -> List[str]:
     """Extract dependencies from Python imports."""

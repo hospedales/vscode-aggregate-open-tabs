@@ -8,7 +8,7 @@ A powerful standalone Python script that recursively traverses project directori
   - Framework and dependency detection
   - Cross-file reference tracking
   - Directory structure analysis
-  - Purpose detection for files and directories
+  - Purpose detection for source code files
   - Language-specific parsing and analysis
 
 - **LLM-Friendly Output**
@@ -42,6 +42,33 @@ A powerful standalone Python script that recursively traverses project directori
 - No external dependencies (uses standard library only)
 - Optional GUI requires Tkinter (included with most Python installations)
 
+## File Type Support
+
+### Fully Supported File Types
+- Python (`.py`)
+- JavaScript/TypeScript (`.js`, `.ts`, `.jsx`, `.tsx`)
+- Java (`.java`)
+- C/C++ (`.c`, `.cpp`, `.h`, `.hpp`)
+- Go (`.go`)
+- Ruby (`.rb`)
+- PHP (`.php`)
+- Shell scripts (`.sh`, `.bash`)
+- Configuration files (`.json`, `.yaml`, `.toml`)
+
+### Partially Supported File Types
+- Markdown (`.md`) - Content aggregation only
+- HTML/CSS - Basic content aggregation
+- Plain text (`.txt`) - Basic content aggregation
+- XML/SVG - Basic content aggregation
+- Environment files (`.env`) - Content with redaction
+
+### Unsupported File Types
+- Binary files
+- Image files
+- Audio/video files
+- Compiled files
+- Compressed archives
+
 ## Installation
 
 1. Copy the script files to your project:
@@ -62,21 +89,64 @@ A powerful standalone Python script that recursively traverses project directori
 ## Usage
 
 ### Command-Line Interface
-
-Basic usage:
 ```bash
 ./python_aggregator.py [options]
 ```
 
-Options:
+Available options:
 - `--root-dir PATH`: Root directory to start aggregation from (default: current directory)
 - `--output-file PATH`: Output file path (default: print to stdout)
 - `--exclude-dirs DIR1 DIR2 ...`: Additional directories to exclude
 - `--format FORMAT`: Output format (markdown/html)
 - `--chunk-size NUM`: Maximum lines per chunk (default: 2000, 0 to disable chunking)
-- `--no-extra-spacing`: Disable extra spacing in output
 - `--track-changes`: Track changes between aggregator runs
 - `--redact`: Enable sensitive data redaction
+- `--no-extra-spacing`: Disable extra spacing in output
+- `--ignore-errors`: Continue processing on non-critical errors
+- `--verbose`: Enable detailed logging output
+
+### Error Handling
+
+The script includes comprehensive error handling for various scenarios:
+
+#### Critical Errors (Stop Processing)
+- Invalid command-line arguments
+- Invalid output format
+- Permission denied errors
+- Memory exhaustion
+- Invalid regex patterns
+
+#### Non-Critical Errors (Warning Only)
+- Purpose detection failures
+- Unsupported file types
+- Encoding issues
+- Parse errors in specific files
+- Missing optional metadata
+
+Error messages are logged with appropriate detail levels:
+```bash
+# Example output with warnings
+2025-01-16 08:36:57,489 - WARNING - Error generating purpose for file.txt: invalid syntax
+2025-01-16 08:36:57,490 - WARNING - Error processing binary file: image.png
+2025-01-16 08:36:57,525 - INFO - Successfully processed: main.py
+```
+
+### Best Practices
+
+1. **File Type Handling**
+   - Use `--exclude-dirs` to skip irrelevant directories
+   - Focus on supported file types for best results
+   - Use appropriate format for your use case
+
+2. **Error Management**
+   - Use `--verbose` for detailed error information
+   - Use `--ignore-errors` for large projects
+   - Check logs for warning patterns
+
+3. **Performance Optimization**
+   - Enable incremental processing for large projects
+   - Use appropriate chunk sizes
+   - Exclude unnecessary directories
 
 ### Graphical Interface
 
