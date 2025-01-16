@@ -323,6 +323,30 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically refresh preview when files change"
+        },
+        "aggregateOpenTabs.cacheMemoryLimitMB": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 1000,
+          "description": "Maximum memory limit for caching analyzed files (in MB)"
+        },
+        "aggregateOpenTabs.enableProgressIndicators": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show progress indicators during file analysis and aggregation"
+        },
+        "aggregateOpenTabs.enableLazyLoading": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable lazy loading for large file content"
+        },
+        "aggregateOpenTabs.largeFileThresholdKB": {
+          "type": "number",
+          "default": 500,
+          "minimum": 100,
+          "maximum": 5000,
+          "description": "File size threshold (in KB) above which lazy loading is triggered"
         }
       }
     }
@@ -340,9 +364,13 @@
     "@types/mocha": "^10.0.6",
     "@types/node": "^20.10.6",
     "@types/vscode": "^1.74.0",
+    "@typescript-eslint/eslint-plugin": "^6.18.0",
+    "@typescript-eslint/parser": "^6.18.0",
+    "eslint": "^8.56.0",
     "mocha": "^10.2.0",
     "minimatch": "^9.0.3",
     "node-fetch": "^2.7.0",
+    "ts-mockito": "^2.6.1",
     "typescript": "^5.3.3"
   },
   "repository": {
