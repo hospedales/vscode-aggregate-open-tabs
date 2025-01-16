@@ -13,6 +13,7 @@
   - Combine all open tabs (or only a selected subset) into a single document.  
   - Automatically chunk long files for improved readability.  
   - Generate AI-powered summaries, lists of imports/exports, dependencies, and more.
+  - **NEW**: Python script for project-wide file aggregation (see [Python Aggregator](#python-aggregator)).
 
 - **File Analysis & Summaries**  
   - Optional AI-based analysis of each file (framework detection, purpose, imports, exports, dependencies).  
@@ -225,3 +226,63 @@ See the [LICENSE](./LICENSE) file for details.
 **Enjoy using Aggregate Open Tabs!** If you have questions, suggestions, or issues, please open a GitHub Issue or submit a PR.
 
 Happy coding!
+
+## Python Aggregator
+
+A standalone Python script is now available for project-wide file aggregation. This complements the VS Code extension by providing a command-line interface that can process entire project directories, not just open tabs.
+
+### Key Features
+- Recursive directory traversal
+- Multiple output formats (plaintext, markdown, HTML)
+- Sensitive data detection and redaction
+- Configurable file chunking
+- Customizable file exclusions
+- No external dependencies required
+
+### Installation
+
+1. Copy `python_aggregator.py` to your project directory
+2. Make it executable (Unix-like systems):
+   ```bash
+   chmod +x python_aggregator.py
+   ```
+
+### Usage
+
+Basic usage:
+```bash
+./python_aggregator.py [options]
+```
+
+Available options:
+- `--root-dir PATH`: Root directory to start aggregation from (default: current directory)
+- `--output-file PATH`: Output file path (default: print to stdout)
+- `--exclude-dirs DIR1 DIR2 ...`: Additional directories to exclude
+- `--redact`: Enable sensitive data redaction
+- `--format FORMAT`: Output format (plaintext/markdown/html)
+- `--chunk-size NUM`: Maximum lines per chunk (default: 2000, 0 to disable chunking)
+- `--no-extra-spacing`: Disable extra spacing in output
+
+### Examples
+
+1. Aggregate all files in the current directory:
+   ```bash
+   ./python_aggregator.py
+   ```
+
+2. Save output to a file in markdown format:
+   ```bash
+   ./python_aggregator.py --format markdown --output-file project.md
+   ```
+
+3. Exclude specific directories and enable redaction:
+   ```bash
+   ./python_aggregator.py --exclude-dirs build dist temp --redact
+   ```
+
+4. Process a specific directory with custom chunk size:
+   ```bash
+   ./python_aggregator.py --root-dir /path/to/project --chunk-size 1000
+   ```
+
+For more detailed information about the Python script, see [python_aggregator.md](./python_aggregator.md).

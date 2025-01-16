@@ -130,6 +130,12 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
-/__pycache__
-/tests/__pycache__
-/tests/__pycache__
+
+# Test coverage and cache
+__pycache__/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+test-reports/
+.DS_Store
