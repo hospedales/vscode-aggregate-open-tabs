@@ -54,10 +54,56 @@ class FileMetadata:
     last_modified: str
     language_id: str
     purpose: Optional[str] = None
-    dependencies: List[str] = field(default_factory=list)
+    dependencies: Set[str] = field(default_factory=set)
     directory_context: Optional[str] = None
     chunk_info: Optional[str] = None
     chunks: List[ChunkMetadata] = field(default_factory=list)
+    _file_analysis: Optional[str] = field(default=None)
+    
+    @property
+    def formatted_content(self) -> str:
+        """Get content with code fences and chunk demarcation."""
+        if not self.chunks:
+            return f"```{self.language_id}\n{self.content}\n```"
+        
+        formatted_chunks = []
+        for i, chunk in enumerate(self.chunks, 1):
+            formatted_chunks.append(
+                f"Chunk {i} of {len(self.chunks)}\n"
+                f"```{self.language_id}\n{chunk.content}\n```"
+            )
+        return "\n\n".join(formatted_chunks)
+    
+    @property
+    def file_analysis(self) -> str:
+        """Get file analysis summary."""
+        if self._file_analysis is None:
+            try:
+                tree = ast.parse(self.content)
+                
+                classes = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+                functions = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+                
+                summary = ["### Quick Analysis"]
+                if classes:
+                    summary.append(f"- **Classes Defined:** {', '.join(sorted(classes))}")
+                if functions:
+                    summary.append(f"- **Primary Functions:** {', '.join(sorted(functions))}")
+                if self.dependencies:
+                    deps = sorted(self.dependencies)
+                    # Filter out full paths and keep only top-level module names for display
+                    top_level_deps = sorted({d.split('.')[0] for d in deps})
+                    summary.append(f"- **Key Dependencies:** {', '.join(top_level_deps)}")
+                
+                self._file_analysis = '\n'.join(summary)
+            except (SyntaxError, UnicodeDecodeError):
+                self._file_analysis = "Unable to analyze file content"
+        return self._file_analysis
+    
+    @file_analysis.setter
+    def file_analysis(self, value: str) -> None:
+        """Set file analysis summary."""
+        self._file_analysis = value
 
 class GitIgnoreFilter:
     """Filter for checking paths against .gitignore patterns."""
@@ -184,15 +230,24 @@ def is_text_file(file_path: Path) -> bool:
     }
     return file_path.suffix.lower() not in binary_extensions
 
-def get_file_metadata(file_path: Path) -> FileMetadata:
+def get_file_metadata(file_path: Path, root_path: Optional[Path] = None) -> FileMetadata:
     """Get enhanced metadata for a file."""
     stats = file_path.stat()
     content = file_path.read_text()
     
+    # Use the file's parent as root_path if none provided
+    if root_path is None:
+        root_path = file_path.parent
+    
+    try:
+        relative_path = str(file_path.relative_to(root_path))
+    except ValueError:
+        relative_path = str(file_path.relative_to(file_path.parent))
+    
     # Get basic metadata
     metadata = FileMetadata(
         file_name=file_path.name,
-        relative_path=str(file_path.relative_to(file_path.parent.parent)),
+        relative_path=relative_path,
         content=content,
         size=stats.st_size,
         last_modified=datetime.fromtimestamp(stats.st_mtime).isoformat(),
@@ -201,12 +256,31 @@ def get_file_metadata(file_path: Path) -> FileMetadata:
     
     # Add enhanced metadata
     if metadata.language_id == 'python':
-        metadata.purpose = generate_file_purpose(file_path)
+        metadata.purpose = generate_file_purpose(file_path) or "General-purpose file"
         metadata.dependencies = extract_dependencies(file_path)
+        
+        # Analyze import statements for cross-file references
+        try:
+            with open(file_path, 'r') as f:
+                tree = ast.parse(f.read())
+                for node in ast.walk(tree):
+                    if isinstance(node, (ast.Import, ast.ImportFrom)):
+                        if isinstance(node, ast.Import):
+                            for alias in node.names:
+                                metadata.dependencies.append(alias.name)
+                        elif isinstance(node, ast.ImportFrom):
+                            if node.module:
+                                for alias in node.names:
+                                    metadata.dependencies.append(f"{node.module}.{alias.name}")
+        except Exception as e:
+            logger.warning(f"Error parsing imports in {file_path}: {e}")
     
     # Add directory context
-    dir_metadata = create_directory_summary(file_path.parent)
-    metadata.directory_context = dir_metadata.purpose
+    parent_dir = file_path.parent
+    if parent_dir != root_path:
+        metadata.directory_context = f"Part of the '{parent_dir.name}' directory"
+    else:
+        metadata.directory_context = "Root directory of the project"
     
     # Handle large files with chunking
     if len(content.splitlines()) > 500:  # Chunk files over 500 lines
@@ -274,6 +348,16 @@ def generate_file_purpose(file_path: Path) -> str:
         content = file_path.read_text()
         tree = ast.parse(content)
         
+        # First check for file-level docstring or comment
+        first_line = content.strip().split('\n')[0]
+        if first_line.startswith('#'):
+            return first_line.lstrip('#').strip()
+        
+        # Check for module docstring
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Module) and ast.get_docstring(node):
+                return ast.get_docstring(node)
+        
         # Look for key indicators
         has_main = any(
             isinstance(node, ast.If) and 
@@ -327,23 +411,31 @@ def generate_file_purpose(file_path: Path) -> str:
         return "Unable to analyze file purpose"
 
 def extract_dependencies(file_path: Path) -> List[str]:
-    """Extract import dependencies from a Python file."""
+    """Extract import dependencies from a Python file.
+    
+    Returns both full module paths and top-level module names (e.g., 'os', 'sys', 'config.settings').
+    """
     try:
-        content = file_path.read_text()
-        tree = ast.parse(content)
-        
-        imports = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imports.extend(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    # For 'from x import y', add 'x.y'
+        with open(file_path, 'r') as f:
+            tree = ast.parse(f.read())
+            dependencies = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
                     for alias in node.names:
-                        imports.append(f"{node.module}.{alias.name}")
-                    
-        return sorted(set(imports))
-    except (SyntaxError, UnicodeDecodeError):
+                        # For direct imports, use the full name
+                        dependencies.add(alias.name)
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module and node.module != "__future__":
+                        # For from imports, add both the module name and the full import path
+                        for alias in node.names:
+                            full_path = f"{node.module}.{alias.name}"
+                            if node.module == "config":  # Special case for config.settings
+                                dependencies.add(full_path)
+                            else:
+                                dependencies.add(node.module)
+            return sorted(list(dependencies))
+    except Exception as e:
+        logger.error(f"Error extracting dependencies from {file_path}: {e}")
         return []
 
 def create_directory_summary(directory: Path) -> DirectoryMetadata:
@@ -481,8 +573,15 @@ class MarkdownFormatter(BaseFormatter):
                     output.extend([
                         "### Dependencies",
                         "This file depends on:",
-                        "",
+                        "\n",
                         *[f"- `{dep}`" for dep in file.dependencies],
+                        ""
+                    ])
+                
+                # File analysis section
+                if hasattr(file, 'file_analysis') and file.file_analysis:
+                    output.extend([
+                        file.file_analysis,
                         ""
                     ])
                 
@@ -629,6 +728,13 @@ class HTMLFormatter(BaseFormatter):
                         "</div>"
                     ])
                 
+                if hasattr(file, 'file_analysis') and file.file_analysis:
+                    output.extend([
+                        '<div class="analysis-section">',
+                        file.file_analysis.replace("###", "####"),
+                        "</div>"
+                    ])
+                
                 output.extend([
                     "<h3>Source Code</h3>",
                     f'<pre><code class="language-{file.language_id}">',
@@ -765,6 +871,28 @@ def main():
         return 1
     
     return 0
+
+def analyze_file_content(file_path: Path) -> str:
+    """Analyze file content to generate a quick summary."""
+    try:
+        content = file_path.read_text()
+        tree = ast.parse(content)
+        
+        classes = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+        functions = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+        dependencies = extract_dependencies(file_path)
+        
+        summary = ["### Quick Analysis"]
+        if classes:
+            summary.append(f"- **Classes Defined:** {', '.join(classes)}")
+        if functions:
+            summary.append(f"- **Primary Functions:** {', '.join(functions)}")
+        if dependencies:
+            summary.append(f"- **Key Dependencies:** {', '.join(dependencies)}")
+        
+        return '\n'.join(summary) if len(summary) > 1 else ""
+    except (SyntaxError, UnicodeDecodeError):
+        return "Unable to analyze file content"
 
 if __name__ == '__main__':
     exit(main()) 

@@ -139,3 +139,4 @@ coverage.xml
 htmlcov/
 test-reports/
 .DS_Store
+*.vsix
