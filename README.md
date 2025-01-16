@@ -19,6 +19,15 @@
   - Optional AI-based analysis of each file (framework detection, purpose, imports, exports, dependencies).  
   - Choose between detailed or concise summaries, with or without code fences.
 
+- **LLM-Friendly Output**
+  - Enhanced metadata with file purpose detection and dependency analysis
+  - Directory context and relationship tracking between files
+  - Standardized YAML metadata blocks for easy parsing
+  - Smart chunking with summaries for large files
+  - Table of contents with file summaries
+  - Cross-reference annotations for related files
+  - Consistent section headers and code fence annotations
+
 - **Sensitive Data Handling**  
   - Detect or redact sensitive data using configurable patterns or environment variables.
 
@@ -116,6 +125,11 @@ All configuration settings can be found by opening **File** > **Preferences** > 
 | `aggregateOpenTabs.sensitiveDataHandling`       | How to handle sensitive data (`warn`, `redact`, `skip`, or `ignore`). Default is `warn`.                                                                                              |
 | `aggregateOpenTabs.customRedactionPatterns`     | Array of regex patterns for additional sensitive data redaction (e.g., `["API_KEY_\\w+", "SECRET_\\w+"]`).                                                                            |
 | `aggregateOpenTabs.openInNewWindow`             | If `true`, aggregated content opens in a new VS Code window (default: `false`).                                                                                                       |
+| `aggregateOpenTabs.llmFriendly`                | If `true`, generates output optimized for LLM consumption with enhanced metadata (default: `true`).                                                                                    |
+| `aggregateOpenTabs.filePurposeDetection`       | If `true`, analyzes files to determine their main purpose (default: `true`).                                                                                                          |
+| `aggregateOpenTabs.dependencyTracking`         | If `true`, tracks and displays file dependencies (default: `true`).                                                                                                                    |
+| `aggregateOpenTabs.directoryContext`           | If `true`, includes directory-level context and relationships (default: `true`).                                                                                                       |
+| `aggregateOpenTabs.yamlMetadata`              | If `true`, formats metadata in YAML blocks for easier parsing (default: `true`).                                                                                                       |
 
 ### Configuration Panel
 
@@ -135,12 +149,55 @@ Aggregate Open Tabs: Open Configuration
 - Expand “Open Files” to see each open file with a short analysis.
 3. **Click “Aggregate # Open Files”**:
 - You’ll see a single aggregated document in the Preview or copied to your clipboard.
+- The output includes enhanced metadata, file purposes, and relationships.
 4. **Use the Preview**:
 - Toggle the preview in the Tree View or run `extension.togglePreview`.
 - Automatic refresh when you change files.
 5. **Selective Aggregation**:
 - Run `extension.selectiveAggregate` from the Command Palette.
 - Uncheck unwanted files from the Quick Pick prompt.
+
+### LLM-Friendly Output Example
+
+The enhanced output includes:
+
+```markdown
+# Project Code Overview
+
+## Project Structure
+This document contains an aggregated view of the project's source code with enhanced metadata and analysis.
+Each file is presented with its purpose, dependencies, and contextual information to aid in understanding.
+
+## Table of Contents
+- [main.ts](#main-ts) - Main entry point for the extension
+- [utils.ts](#utils-ts) - Utility functions for file handling and analysis
+...
+
+## main.ts
+### File Purpose
+Main executable script | Defines extension activation and commands
+
+### Directory Context
+Source directory containing core extension functionality
+
+### Dependencies
+- `vscode`
+- `./utils`
+- `./treeView`
+
+### Metadata
+```yaml
+path: src/main.ts
+language: typescript
+size: 2048 bytes
+last_modified: 2025-01-16T00:00:00Z
+```
+
+### Source Code
+```typescript
+// File contents here...
+```
+```
 
 ## Security & Sensitive Data
 

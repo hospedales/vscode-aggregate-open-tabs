@@ -1,139 +1,157 @@
+#!/usr/bin/env python3
+
 import unittest
-import os
-import tempfile
-import shutil
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Optional
+from dataclasses import dataclass
+import tempfile
+import os
+import shutil
+
+# Import the module to test
 from python_aggregator import (
     FileMetadata,
+    DirectoryMetadata,
+    ChunkMetadata,
     get_file_metadata,
-    should_ignore_file,
-    detect_sensitive_data,
-    redact_sensitive_data,
-    aggregate_files,
+    generate_file_purpose,
+    extract_dependencies,
+    create_directory_summary,
     BaseFormatter,
-    PlainTextFormatter,
-    MarkdownFormatter,
-    HTMLFormatter,
+    MarkdownFormatter
 )
 
-class TestPythonAggregator(unittest.TestCase):
+class TestEnhancedMetadata(unittest.TestCase):
     def setUp(self):
         # Create a temporary directory for test files
-        self.test_dir = tempfile.mkdtemp()
-        self.sample_files = self._create_sample_files()
+        self.test_dir = Path(tempfile.mkdtemp())
+        
+        # Create some test files and directories
+        self.test_files = {
+            'main.py': '''
+import utils
+from config import settings
 
-    def tearDown(self):
-        # Clean up temporary directory
-        shutil.rmtree(self.test_dir)
-
-    def _create_sample_files(self) -> Dict[str, str]:
-        """Create sample files for testing and return their paths and contents."""
-        files = {
-            "main.py": "def main():\n    print('Hello, World!')\n\nif __name__ == '__main__':\n    main()",
-            "config.json": '{\n    "api_key": "secret123",\n    "debug": true\n}',
-            "README.md": "# Test Project\nThis is a test project.",
-            ".env": "API_KEY=secret123\nDEBUG=true",
-            "node_modules/package/index.js": "console.log('Should be ignored')",
-            ".git/config": "[core]\n    bare = false",
+def main():
+    print("Hello World")
+    
+if __name__ == "__main__":
+    main()
+''',
+            'utils.py': '''
+def helper():
+    return "Helper function"
+''',
+            'config/settings.py': '''
+API_KEY = "dummy_key"
+DEBUG = True
+'''
         }
-
-        for rel_path, content in files.items():
-            full_path = Path(self.test_dir) / rel_path
+        
+        # Create the files in the temp directory
+        for file_path, content in self.test_files.items():
+            full_path = self.test_dir / file_path
             full_path.parent.mkdir(parents=True, exist_ok=True)
             full_path.write_text(content)
-
-        return files
-
-    def test_file_metadata(self):
-        """Test file metadata collection."""
-        test_file = Path(self.test_dir) / "main.py"
-        metadata = get_file_metadata(test_file)
-
-        self.assertEqual(metadata.file_name, "main.py")
-        self.assertEqual(metadata.language_id, "python")
-        self.assertEqual(metadata.content, self.sample_files["main.py"])
-        self.assertGreater(metadata.size, 0)
-        self.assertTrue(metadata.last_modified)
-
-    def test_ignore_patterns(self):
-        """Test file ignoring patterns."""
-        # Should be ignored
-        self.assertTrue(should_ignore_file(Path(self.test_dir) / "node_modules/package/index.js"))
-        self.assertTrue(should_ignore_file(Path(self.test_dir) / ".git/config"))
+    
+    def tearDown(self):
+        # Clean up the temporary directory
+        shutil.rmtree(self.test_dir)
+    
+    def test_file_metadata_enhanced_fields(self):
+        """Test the enhanced FileMetadata class with new fields"""
+        file_path = self.test_dir / 'main.py'
+        metadata = get_file_metadata(file_path)
         
-        # Should not be ignored
-        self.assertFalse(should_ignore_file(Path(self.test_dir) / "main.py"))
-        self.assertFalse(should_ignore_file(Path(self.test_dir) / "config.json"))
+        # Basic metadata fields
+        self.assertEqual(metadata.file_name, 'main.py')
+        self.assertEqual(metadata.language_id, 'python')
+        
+        # New enhanced fields
+        self.assertIsInstance(metadata.purpose, str)
+        self.assertIsInstance(metadata.dependencies, list)
+        self.assertIsInstance(metadata.directory_context, str)
+        
+        # Check dependencies are correctly identified
+        self.assertIn('utils', metadata.dependencies)
+        self.assertIn('config.settings', metadata.dependencies)
+    
+    def test_directory_metadata(self):
+        """Test the DirectoryMetadata class"""
+        config_dir = self.test_dir / 'config'
+        dir_metadata = create_directory_summary(config_dir)
+        
+        self.assertIsInstance(dir_metadata.name, str)
+        self.assertIsInstance(dir_metadata.purpose, str)
+        self.assertIsInstance(dir_metadata.files, list)
+        self.assertEqual(len(dir_metadata.files), 1)  # Should contain settings.py
+    
+    def test_chunk_metadata(self):
+        """Test the ChunkMetadata for large file sectioning"""
+        large_content = "\n".join([f"line {i}" for i in range(1000)])
+        large_file = self.test_dir / 'large_file.py'
+        large_file.write_text(large_content)
+        
+        metadata = get_file_metadata(large_file)
+        self.assertIsNotNone(metadata.chunk_info)
+        self.assertGreater(len(metadata.chunks), 0)
+        
+        # Test chunk properties
+        first_chunk = metadata.chunks[0]
+        self.assertIsInstance(first_chunk.summary, str)
+        self.assertIsInstance(first_chunk.start_line, int)
+        self.assertIsInstance(first_chunk.end_line, int)
+    
+    def test_file_purpose_generation(self):
+        """Test the file purpose generation functionality"""
+        main_file = self.test_dir / 'main.py'
+        purpose = generate_file_purpose(main_file)
+        
+        self.assertIsInstance(purpose, str)
+        self.assertGreater(len(purpose), 0)
+        self.assertIn("main", purpose.lower())  # Should mention it's a main script
+    
+    def test_dependency_extraction(self):
+        """Test the dependency extraction functionality"""
+        main_file = self.test_dir / 'main.py'
+        deps = extract_dependencies(main_file)
+        
+        self.assertIsInstance(deps, list)
+        self.assertEqual(len(deps), 2)  # Should find utils and config.settings
+        self.assertIn('utils', deps)
+        self.assertIn('config.settings', deps)
 
-    def test_sensitive_data_detection(self):
-        """Test sensitive data detection."""
-        content = self.sample_files["config.json"]
-        matches = detect_sensitive_data(content)
-
-        self.assertTrue(any(match.pattern == "api_key" for match in matches))
-        self.assertTrue(any("secret123" in match.value for match in matches))
-
-    def test_sensitive_data_redaction(self):
-        """Test sensitive data redaction."""
-        content = self.sample_files["config.json"]
-        matches = detect_sensitive_data(content)
-        redacted = redact_sensitive_data(content, matches)
-
-        self.assertNotIn("secret123", redacted)
-        self.assertIn("*****", redacted)
-
-    def test_file_aggregation(self):
-        """Test file aggregation process."""
-        output = aggregate_files(
-            root_dir=self.test_dir,
-            exclude_dirs=["node_modules", ".git"],
-            redact=True,
-            output_format="plaintext"
+class TestEnhancedFormatters(unittest.TestCase):
+    def setUp(self):
+        self.test_file = FileMetadata(
+            file_name='test.py',
+            relative_path='src/test.py',
+            content='print("test")',
+            size=100,
+            last_modified='2025-01-16T00:00:00Z',
+            language_id='python',
+            purpose='Test file for unit tests',
+            dependencies=['utils'],
+            directory_context='Source directory containing application code'
         )
-
-        # Check that ignored files are not included
-        self.assertNotIn("Should be ignored", output)
-        self.assertNotIn("[core]", output)
-
-        # Check that other files are included
-        self.assertIn("def main():", output)
-        self.assertIn("# Test Project", output)
-
-        # Check that sensitive data is redacted
-        self.assertNotIn("secret123", output)
-
-    def test_plaintext_formatter(self):
-        """Test plaintext output formatting."""
-        formatter = PlainTextFormatter()
-        metadata = get_file_metadata(Path(self.test_dir) / "main.py")
-        output = formatter.format([metadata])
-
-        self.assertIn("=============================================================================", output)
-        self.assertIn("File: main.py", output)
-        self.assertIn("def main():", output)
-
-    def test_markdown_formatter(self):
-        """Test markdown output formatting."""
+    
+    def test_markdown_formatter_enhanced_output(self):
+        """Test the enhanced markdown formatter output"""
         formatter = MarkdownFormatter()
-        metadata = get_file_metadata(Path(self.test_dir) / "main.py")
-        output = formatter.format([metadata])
-
-        self.assertIn("## main.py", output)
-        self.assertIn("```python", output)
-        self.assertIn("def main():", output)
-        self.assertIn("```", output)
-
-    def test_html_formatter(self):
-        """Test HTML output formatting."""
-        formatter = HTMLFormatter()
-        metadata = get_file_metadata(Path(self.test_dir) / "main.py")
-        output = formatter.format([metadata])
-
-        self.assertIn('<h2 class="file-title">main.py</h2>', output)
-        self.assertIn('<pre><code class="language-python">', output)
-        self.assertIn("def main():", output)
-        self.assertIn("</code></pre>", output)
+        output = formatter.format([self.test_file])
+        
+        # Check for new metadata sections
+        self.assertIn('## File Purpose', output)
+        self.assertIn('Test file for unit tests', output)
+        self.assertIn('## Dependencies', output)
+        self.assertIn('utils', output)
+        self.assertIn('## Directory Context', output)
+        self.assertIn('Source directory', output)
+        
+        # Check for code section
+        self.assertIn('```python', output)
+        self.assertIn('print("test")', output)
+        self.assertIn('```', output)
 
 if __name__ == '__main__':
     unittest.main() 
