@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-export async function selectFilesToAggregate(documents: vscode.TextDocument[]): Promise<vscode.TextDocument[] | undefined> {
+export async function selectFilesToAggregate(documents: readonly vscode.TextDocument[]): Promise<vscode.TextDocument[] | undefined> {
     // Create QuickPick items for each document
     const items = documents.map(doc => ({
         label: doc.fileName,

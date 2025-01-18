@@ -28,14 +28,25 @@
           "id": "aggregateOpenTabsView",
           "name": "Aggregate Files",
           "type": "tree",
-          "dragAndDropController": "aggregateOpenTabsView"
+          "icon": "media/icon.svg"
         }
       ]
     },
     "commands": [
       {
         "command": "extension.aggregateOpenTabs",
-        "title": "Aggregate Open Tabs into One File"
+        "title": "Aggregate Open Tabs into One File",
+        "icon": "$(files)"
+      },
+      {
+        "command": "extension.selectiveAggregate",
+        "title": "Selectively Aggregate Open Tabs",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "extension.copyAggregatedContent",
+        "title": "Copy Aggregated Content to Clipboard",
+        "icon": "$(copy)"
       },
       {
         "command": "extension.refreshAggregateView",
@@ -43,47 +54,23 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "extension.selectiveAggregate",
-        "title": "Selectively Aggregate Open Tabs"
-      },
-      {
-        "command": "extension.copyAggregatedContent",
-        "title": "Copy Aggregated Content"
-      },
-      {
-        "command": "extension.copyTerminalOutput",
-        "title": "Copy Terminal Output",
-        "icon": "$(terminal)"
-      },
-      {
-        "command": "extension.openInNewWindow",
-        "title": "Open Aggregated File in New Window"
-      },
-      {
-        "command": "extension.uploadToGist",
-        "title": "Upload Aggregated Content to GitHub Gist"
-      },
-      {
-        "command": "extension.saveSnapshot",
-        "title": "Save Current Aggregation as Snapshot"
-      },
-      {
-        "command": "extension.loadSnapshot",
-        "title": "Load Previous Aggregation Snapshot"
-      },
-      {
-        "command": "extension.togglePreview",
-        "title": "Toggle Aggregation Preview",
-        "icon": "$(preview)"
-      },
-      {
         "command": "extension.openConfiguration",
-        "title": "Open Aggregate Open Tabs Configuration",
+        "title": "Open Configuration",
         "icon": "$(gear)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "extension.aggregateOpenTabs",
+          "when": "view == aggregateOpenTabsView",
+          "group": "navigation"
+        },
+        {
+          "command": "extension.selectiveAggregate",
+          "when": "view == aggregateOpenTabsView",
+          "group": "navigation"
+        },
         {
           "command": "extension.refreshAggregateView",
           "when": "view == aggregateOpenTabsView",
@@ -98,16 +85,6 @@
       "view/item/context": [
         {
           "command": "extension.copyAggregatedContent",
-          "when": "viewItem == aggregatedFile",
-          "group": "inline"
-        },
-        {
-          "command": "extension.openInNewWindow",
-          "when": "viewItem == aggregatedFile",
-          "group": "inline"
-        },
-        {
-          "command": "extension.uploadToGist",
           "when": "viewItem == aggregatedFile",
           "group": "inline"
         }
@@ -137,26 +114,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "List of file extensions to include (e.g., [\".ts\", \".js\"]). Leave empty [] or set to [\"*\"] to include all file types.",
-          "examples": [
-            [],
-            [
-              "*"
-            ],
-            [
-              ".ts",
-              ".js",
-              ".tsx"
-            ],
-            [
-              ".py",
-              ".ipynb"
-            ],
-            [
-              ".java",
-              ".kt"
-            ]
-          ]
+          "description": "List of file extensions to include (e.g., [\".ts\", \".js\"]). Leave empty [] or set to [\"*\"] to include all file types."
         },
         "aggregateOpenTabs.chunkSize": {
           "type": "number",
@@ -175,69 +133,15 @@
           ],
           "description": "Glob patterns for files to exclude from aggregation."
         },
-        "aggregateOpenTabs.addSummaries": {
+        "aggregateOpenTabs.extraSpacing": {
           "type": "boolean",
           "default": true,
-          "description": "Add short summaries for each file in the aggregated output."
-        },
-        "aggregateOpenTabs.openInNewWindow": {
-          "type": "boolean",
-          "default": false,
-          "description": "Open aggregated file in a new VS Code window by default."
-        },
-        "aggregateOpenTabs.sensitiveDataHandling": {
-          "type": "string",
-          "enum": [
-            "warn",
-            "redact",
-            "skip",
-            "ignore"
-          ],
-          "default": "warn",
-          "description": "How to handle potentially sensitive data (API keys, passwords, etc.)"
-        },
-        "aggregateOpenTabs.customRedactionPatterns": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "Additional regex patterns to detect sensitive data."
-        },
-        "aggregateOpenTabs.outputFormat": {
-          "type": "string",
-          "enum": [
-            "plaintext",
-            "markdown",
-            "html"
-          ],
-          "default": "plaintext",
-          "description": "Format of the aggregated output."
-        },
-        "aggregateOpenTabs.keepSnapshots": {
-          "type": "boolean",
-          "default": true,
-          "description": "Keep historical snapshots of aggregated content."
-        },
-        "aggregateOpenTabs.maxSnapshots": {
-          "type": "number",
-          "default": 10,
-          "description": "Maximum number of historical snapshots to keep."
-        },
-        "aggregateOpenTabs.githubGistToken": {
-          "type": "string",
-          "default": "",
-          "description": "GitHub personal access token for Gist creation (optional)."
+          "description": "Add extra spacing between files in the output."
         },
         "aggregateOpenTabs.enhancedSummaries": {
           "type": "boolean",
           "default": true,
-          "description": "Generate detailed summaries including framework detection, file purpose, and AI analysis."
-        },
-        "aggregateOpenTabs.extraSpacing": {
-          "type": "boolean",
-          "default": true,
-          "description": "Add extra blank lines around code blocks and sections for better readability."
+          "description": "Include enhanced file summaries in the output."
         },
         "aggregateOpenTabs.codeFenceLanguageMap": {
           "type": "object",
@@ -246,131 +150,9 @@
             "javascriptreact": "jsx",
             "typescript": "ts",
             "javascript": "js",
-            "markdown": "md",
-            "plaintext": "text"
+            "markdown": "md"
           },
-          "description": "Map of VS Code language IDs to code fence language identifiers for Markdown output."
-        },
-        "aggregateOpenTabs.useCodeFences": {
-          "type": "boolean",
-          "default": true,
-          "description": "Wrap code blocks in language-specific code fences (e.g. ```typescript) for better syntax highlighting in Markdown-aware contexts."
-        },
-        "aggregateOpenTabs.chunkSeparatorStyle": {
-          "type": "string",
-          "enum": [
-            "double",
-            "single",
-            "minimal"
-          ],
-          "default": "double",
-          "description": "Style of chunk separators: double (=====), single (-----), or minimal (--)."
-        },
-        "aggregateOpenTabs.tailoredSummaries": {
-          "type": "boolean",
-          "default": true,
-          "description": "Generate unique summaries for each file instead of using generic descriptions."
-        },
-        "aggregateOpenTabs.includeKeyPoints": {
-          "type": "boolean",
-          "default": true,
-          "description": "Include key points in the AI analysis section."
-        },
-        "aggregateOpenTabs.includeAISummaries": {
-          "type": "boolean",
-          "default": true,
-          "description": "Include AI-generated summaries and key points for each file."
-        },
-        "aggregateOpenTabs.aiSummaryStyle": {
-          "type": "string",
-          "enum": [
-            "minimal",
-            "basic",
-            "standard",
-            "detailed",
-            "comprehensive"
-          ],
-          "default": "standard",
-          "description": "Depth of AI-generated summaries (minimal: purpose only, basic: purpose + main features, standard: balanced analysis, detailed: full analysis, comprehensive: exhaustive analysis)."
-        },
-        "aggregateOpenTabs.includeImports": {
-          "type": "boolean",
-          "default": true,
-          "description": "Include import statements in file summaries."
-        },
-        "aggregateOpenTabs.showPreviewOnStartup": {
-          "type": "boolean",
-          "default": false,
-          "description": "Show the aggregation preview panel when the extension starts."
-        },
-        "aggregateOpenTabs.includeCrossReferences": {
-          "type": "boolean",
-          "default": true,
-          "description": "Include cross-references between files in the output (imports, exports, dependencies)."
-        },
-        "aggregateOpenTabs.preview.showSourceView": {
-          "type": "boolean",
-          "default": false,
-          "description": "Show source view alongside the preview"
-        },
-        "aggregateOpenTabs.preview.syntaxHighlighting": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable syntax highlighting in the preview"
-        },
-        "aggregateOpenTabs.preview.collapsibleSections": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable collapsible sections in the preview"
-        },
-        "aggregateOpenTabs.preview.searchEnabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable search functionality in the preview"
-        },
-        "aggregateOpenTabs.preview.autoRefresh": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically refresh preview when files change"
-        },
-        "aggregateOpenTabs.cacheMemoryLimitMB": {
-          "type": "number",
-          "default": 100,
-          "minimum": 10,
-          "maximum": 1000,
-          "description": "Maximum memory limit for caching analyzed files (in MB)"
-        },
-        "aggregateOpenTabs.enableProgressIndicators": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show progress indicators during file analysis and aggregation"
-        },
-        "aggregateOpenTabs.enableLazyLoading": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable lazy loading for large file content"
-        },
-        "aggregateOpenTabs.largeFileThresholdKB": {
-          "type": "number",
-          "default": 500,
-          "minimum": 100,
-          "maximum": 5000,
-          "description": "File size threshold (in KB) above which lazy loading is triggered"
-        },
-        "aggregateOpenTabs.includeTerminalOutput": {
-          "type": "boolean",
-          "default": true,
-          "description": "Whether to include terminal output in aggregations"
-        },
-        "aggregateOpenTabs.terminalOutputMaxLines": {
-          "type": "number",
-          "default": 100,
-          "description": "Maximum number of lines to capture from terminal history"
-        },
-        "aggregateOpenTabs.maxTerminalLines": {
-          "type": "number",
-          "default": 1000,
-          "description": "Maximum number of lines to capture from terminal output."
+          "description": "Map of VS Code language IDs to code fence language identifiers."
         }
       }
     }
