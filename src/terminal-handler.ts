@@ -50,11 +50,16 @@ export class TerminalHandler {
     private captureTerminal: vscode.Terminal | undefined;
 
     /**
-     * Gets the currently active terminal
-     * @returns The active terminal or undefined if none exists
+     * Gets the currently active terminal or creates a new one if none exists
+     * @returns The active terminal or a newly created terminal
      */
-    async getActiveTerminal(): Promise<vscode.Terminal | undefined> {
-        return vscode.window.activeTerminal;
+    async getActiveTerminal(): Promise<vscode.Terminal> {
+        let terminal = vscode.window.activeTerminal;
+        if (!terminal) {
+            terminal = vscode.window.createTerminal('Aggregate Terminal');
+            terminal.show();
+        }
+        return terminal;
     }
 
     /**

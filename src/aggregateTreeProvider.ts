@@ -42,7 +42,6 @@ export class AggregateTreeProvider implements
     private _onDidChangeTreeData: vscode.EventEmitter<AggregateTreeItem | undefined | null | void> = new vscode.EventEmitter<AggregateTreeItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<AggregateTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
-    private fileOrder: string[] = [];
     private selectedFiles: Set<string> = new Set();
     private isSelective: boolean = false;
     private terminalOutputs: string[] = [];
@@ -87,17 +86,17 @@ export class AggregateTreeProvider implements
 
     /* eslint-disable @typescript-eslint/no-unused-vars */
     public async handleDrag(
-        source: readonly AggregateTreeItem[],
-        dataTransfer: vscode.DataTransfer,
-        token: vscode.CancellationToken
+        _source: readonly AggregateTreeItem[],
+        _dataTransfer: vscode.DataTransfer,
+        _token: vscode.CancellationToken
     ): Promise<void> {
         // Implementation not needed for this feature
     }
 
     public async handleDrop(
-        target: AggregateTreeItem | undefined,
-        dataTransfer: vscode.DataTransfer,
-        token: vscode.CancellationToken
+        _target: AggregateTreeItem | undefined,
+        _dataTransfer: vscode.DataTransfer,
+        _token: vscode.CancellationToken
     ): Promise<void> {
         // Implementation not needed for this feature
     }

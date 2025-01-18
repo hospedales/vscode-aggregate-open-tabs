@@ -62,18 +62,13 @@ export class CacheManager {
     }
 
     private async evictIfNeeded(requiredSize: number): Promise<void> {
-        if (this.currentMemoryUsage + requiredSize <= this.memoryLimit) {
-            return;
-        }
+        while (this.currentMemoryUsage + requiredSize > this.memoryLimit && this.cache.size > 0) {
+            // Sort entries by last access time
+            const entries = Array.from(this.cache.entries())
+                .sort(([, a], [, b]) => a.lastModified - b.lastModified);
 
-        // Sort entries by last access time
-        const entries = Array.from(this.cache.entries())
-            .sort(([, a], [, b]) => a.lastModified - b.lastModified);
-
-        for (const [key, entry] of entries) {
-            if (this.currentMemoryUsage + requiredSize <= this.memoryLimit) {
-                break;
-            }
+            // Remove oldest entry
+            const [key, entry] = entries[0];
             const entrySize = this.estimateEntrySize(entry);
             this.cache.delete(key);
             this.currentMemoryUsage -= entrySize;
@@ -91,7 +86,8 @@ export class CacheManager {
         // Check if we have a valid cache entry
         if (!forceRefresh && this.cache.has(key)) {
             const entry = this.cache.get(key)!;
-            if (!entry.isDirty && entry.lastModified === document.version) {
+            if (!entry.isDirty) {
+                entry.lastModified = currentTime; // Update access time
                 this.reportProgress(`Using cached version of ${document.fileName}`, 5);
                 return entry.metadata;
             }
@@ -132,6 +128,12 @@ export class CacheManager {
 
         // Check memory limits and evict if needed
         const entrySize = this.estimateEntrySize(entry);
+        if (entrySize > this.memoryLimit) {
+            // If a single entry is too large, don't cache it
+            this.reportProgress(`File too large to cache: ${document.fileName}`, 0);
+            return metadata;
+        }
+
         await this.evictIfNeeded(entrySize);
 
         // Update cache
@@ -146,6 +148,7 @@ export class CacheManager {
         const entry = this.cache.get(fileName);
         if (entry) {
             entry.isDirty = true;
+            entry.lastModified = Date.now(); // Update timestamp when marking dirty
         }
     }
 

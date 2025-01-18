@@ -258,7 +258,11 @@
         },
         "aggregateOpenTabs.chunkSeparatorStyle": {
           "type": "string",
-          "enum": ["double", "single", "minimal"],
+          "enum": [
+            "double",
+            "single",
+            "minimal"
+          ],
           "default": "double",
           "description": "Style of chunk separators: double (=====), single (-----), or minimal (--)."
         },
@@ -362,6 +366,11 @@
           "type": "number",
           "default": 100,
           "description": "Maximum number of lines to capture from terminal history"
+        },
+        "aggregateOpenTabs.maxTerminalLines": {
+          "type": "number",
+          "default": 1000,
+          "description": "Maximum number of lines to capture from terminal output."
         }
       }
     }
@@ -375,15 +384,17 @@
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
+    "@types/glob": "^8.1.0",
     "@types/minimatch": "^5.1.2",
-    "@types/mocha": "^10.0.6",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.10.6",
     "@types/vscode": "^1.74.0",
     "@typescript-eslint/eslint-plugin": "^6.18.0",
     "@typescript-eslint/parser": "^6.18.0",
+    "@vscode/test-electron": "^2.4.1",
     "eslint": "^8.56.0",
-    "mocha": "^10.2.0",
     "minimatch": "^9.0.3",
+    "mocha": "^10.8.2",
     "ts-mockito": "^2.6.1",
     "typescript": "^5.3.3"
   },

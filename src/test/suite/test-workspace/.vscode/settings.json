@@ -1,0 +1,13 @@
+{
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/CVS": true,
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true
+    },
+    "aggregateOpenTabs.includeTerminalOutput": true,
+    "aggregateOpenTabs.terminalOutputMaxLines": 100,
+    "aggregateOpenTabs.cacheMemoryLimitMB": 100
+} 
