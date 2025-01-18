@@ -5,7 +5,7 @@ import { TerminalHandler } from './terminal-handler';
 
 export function activate(context: vscode.ExtensionContext) {
     const treeDataProvider = new AggregateTreeProvider();
-    vscode.window.createTreeView('aggregateOpenTabs', { treeDataProvider });
+    vscode.window.createTreeView('aggregateOpenTabsView', { treeDataProvider });
     const terminalHandler = new TerminalHandler();
 
     // Register commands
