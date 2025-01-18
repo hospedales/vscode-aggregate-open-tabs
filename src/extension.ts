@@ -8,6 +8,7 @@ import { StorageManager } from './storage';
 import { AggregateTreeProvider } from './aggregateTreeProvider';
 import { detectSensitiveData, redactSensitiveData } from './security';
 import { ConfigurationPanel } from './configurationUI';
+import { TerminalHandler } from './terminal-handler';
 
 let treeDataProvider: AggregateTreeProvider;
 let storageManager: StorageManager;
@@ -31,7 +32,7 @@ class PreviewPanel {
     private readonly _extensionUri: vscode.Uri;
     private _updateTimeout: NodeJS.Timeout | undefined;
     private _lastProcessedFiles: Set<string> = new Set();
-    private _cachedMetadata: Map<string, any> = new Map();
+    private _cachedMetadata: Map<string, FileMetadata> = new Map();
     private _processingQueue: Promise<void> = Promise.resolve();
     private _currentSourceContent: string = '';
 
@@ -147,7 +148,7 @@ class PreviewPanel {
     public async updateContent(forceRefresh: boolean = false): Promise<void> {
         try {
             const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
-            let openFiles = vscode.window.visibleTextEditors
+            const openFiles = vscode.window.visibleTextEditors
                 .map(editor => editor.document)
                 .filter(doc => 
                     !doc.isUntitled && 
@@ -340,6 +341,40 @@ export async function activate(context: vscode.ExtensionContext) {
     storageManager = new StorageManager(context);
     treeDataProvider = new AggregateTreeProvider();
 
+    // Initialize handlers
+    const terminalHandler = new TerminalHandler();
+    
+    // Register terminal command
+    const terminalCommand = vscode.commands.registerCommand('extension.copyTerminalOutput', async () => {
+        const result = await terminalHandler.captureTerminalOutput();
+        
+        if (result.success && result.output) {
+            const terminal = await terminalHandler.getActiveTerminal();
+            if (!terminal) {
+                vscode.window.showErrorMessage('No active terminal found');
+                return;
+            }
+
+            const formatted = terminalHandler.formatTerminalOutput(result.output, terminal);
+                
+            // Add to current aggregation or copy to clipboard
+            if (treeDataProvider) {
+                await treeDataProvider.addTerminalOutput(formatted);
+                vscode.window.showInformationMessage('Terminal output added to aggregation');
+            } else {
+                await vscode.env.clipboard.writeText(formatted);
+                vscode.window.showInformationMessage('Terminal output copied to clipboard');
+            }
+        } else {
+            vscode.window.showErrorMessage(`Failed to capture terminal output: ${result.error}`);
+        }
+    });
+
+    context.subscriptions.push(
+        terminalCommand,
+        terminalHandler
+    );
+
     // Register commands
     context.subscriptions.push(
         vscode.commands.registerCommand('extension.aggregateOpenTabs', () => aggregateFiles(false)),
@@ -431,7 +466,7 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
                         const sensitiveMatches = await detectSensitiveData(content, customRedactionPatterns);
                         if (sensitiveMatches.length > 0) {
                             switch (sensitiveDataHandling) {
-                                case 'warn':
+                                case 'warn': {
                                     const message = `Sensitive data detected in ${path.basename(doc.fileName)}. Proceed?`;
                                     const proceed = await vscode.window.showWarningMessage(
                                         message,
@@ -443,6 +478,7 @@ async function aggregateFiles(selective: boolean = false): Promise<void> {
                                         return null;
                                     }
                                     break;
+                                }
                                 case 'redact':
                                     metadata.content = await redactSensitiveData(content, sensitiveMatches);
                                     break;

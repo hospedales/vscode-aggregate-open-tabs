@@ -84,6 +84,37 @@ Default shortcuts (customizable in VSCode settings):
 - `Ctrl+Shift+A` (Windows/Linux) or `Cmd+Shift+A` (Mac): Aggregate open tabs
 - `Ctrl+Shift+P` then type "Tab Aggregator": Access all commands
 
+### Terminal Integration
+The extension now supports capturing and including terminal output in your aggregations:
+
+- **Terminal Output Capture**: Use the "Copy Terminal Output" command to include console output
+- **Multiple Capture Methods**:
+  1. Direct Selection: Select text in the terminal to capture it
+  2. Automatic History: Captures recent command history
+  3. Manual Selection: Guide for manual text selection when needed
+- **Terminal Output in Tree View**: Terminal outputs appear in the sidebar with other files
+- **Metadata Inclusion**: Each terminal capture includes:
+  - Terminal name
+  - Timestamp
+  - Shell information
+- **Configuration Options**:
+  - Enable/disable terminal output capture
+  - Set maximum lines to capture
+  - Control terminal output inclusion in aggregations
+
+To capture terminal output:
+1. Open a terminal in VS Code
+2. Run your commands
+3. Either:
+   - Select specific text in the terminal
+   - Or use the "Copy Terminal Output" command from the command palette
+4. The captured output will be added to your aggregation
+
+Add the following new settings:
+
+- `aggregateOpenTabs.includeTerminalOutput`: Enable/disable terminal output capture (default: true)
+- `aggregateOpenTabs.terminalOutputMaxLines`: Maximum number of lines to capture from terminal history (default: 100)
+
 ## Advanced Features
 
 ### Preview Panel Features

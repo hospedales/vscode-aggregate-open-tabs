@@ -48,7 +48,12 @@
       },
       {
         "command": "extension.copyAggregatedContent",
-        "title": "Copy Aggregated Content to Clipboard"
+        "title": "Copy Aggregated Content"
+      },
+      {
+        "command": "extension.copyTerminalOutput",
+        "title": "Copy Terminal Output",
+        "icon": "$(terminal)"
       },
       {
         "command": "extension.openInNewWindow",
@@ -347,6 +352,16 @@
           "minimum": 100,
           "maximum": 5000,
           "description": "File size threshold (in KB) above which lazy loading is triggered"
+        },
+        "aggregateOpenTabs.includeTerminalOutput": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to include terminal output in aggregations"
+        },
+        "aggregateOpenTabs.terminalOutputMaxLines": {
+          "type": "number",
+          "default": 100,
+          "description": "Maximum number of lines to capture from terminal history"
         }
       }
     }
