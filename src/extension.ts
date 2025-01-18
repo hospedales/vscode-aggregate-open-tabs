@@ -10,7 +10,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register commands
     context.subscriptions.push(
-        vscode.commands.registerCommand('aggregateOpenTabs.showConfiguration', () => {
+        vscode.commands.registerCommand('extension.refreshAggregateView', () => {
+            treeDataProvider.refresh();
+        }),
+        vscode.commands.registerCommand('extension.openConfiguration', () => {
             ConfigurationPanel.createOrShow(context.extensionUri);
         }),
         vscode.commands.registerCommand('aggregateOpenTabs.getActiveTerminal', () => {
