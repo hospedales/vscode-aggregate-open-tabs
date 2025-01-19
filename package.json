@@ -35,28 +35,39 @@
     "commands": [
       {
         "command": "extension.aggregateOpenTabs",
-        "title": "Aggregate Open Tabs into One File",
-        "icon": "$(files)"
+        "title": "Aggregate Open Tabs"
       },
       {
         "command": "extension.selectiveAggregate",
-        "title": "Selectively Aggregate Open Tabs",
-        "icon": "$(list-selection)"
+        "title": "Aggregate Selectively"
       },
       {
-        "command": "extension.copyAggregatedContent",
-        "title": "Copy Aggregated Content to Clipboard",
-        "icon": "$(copy)"
+        "command": "extension.openInNewWindow",
+        "title": "Open in New Window"
+      },
+      {
+        "command": "extension.uploadToGist",
+        "title": "Upload to Gist"
+      },
+      {
+        "command": "extension.saveSnapshot",
+        "title": "Save Snapshot"
+      },
+      {
+        "command": "extension.loadSnapshot",
+        "title": "Load Snapshot"
+      },
+      {
+        "command": "extension.togglePreview",
+        "title": "Toggle Preview"
       },
       {
         "command": "extension.refreshAggregateView",
-        "title": "Refresh",
-        "icon": "$(refresh)"
+        "title": "Refresh View"
       },
       {
         "command": "extension.openConfiguration",
-        "title": "Open Configuration",
-        "icon": "$(gear)"
+        "title": "Open Configuration"
       }
     ],
     "menus": {
@@ -114,55 +125,60 @@
             "type": "string"
           },
           "default": [],
-          "description": "List of file extensions to include (e.g., [\".ts\", \".js\"]). Leave empty [] or set to [\"*\"] to include all file types."
+          "description": "File types to include in aggregation. Leave empty to include all types."
         },
-        "aggregateOpenTabs.chunkSize": {
-          "type": "number",
-          "default": 2000,
-          "description": "Maximum number of lines per chunk when splitting large files. Set to 0 to disable chunking."
-        },
-        "aggregateOpenTabs.excludePatterns": {
+        "aggregateOpenTabs.excludeFileTypes": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "default": [
-            "**/*.env",
-            "**/*.lock",
-            "**/node_modules/**"
-          ],
-          "description": "Glob patterns for files to exclude from aggregation."
+          "default": [],
+          "description": "File types to exclude from aggregation."
+        },
+        "aggregateOpenTabs.preview.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh preview when files change."
+        },
+        "aggregateOpenTabs.preview.splitView": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show split view in preview panel."
+        },
+        "aggregateOpenTabs.preview.showLineNumbers": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show line numbers in preview."
         },
         "aggregateOpenTabs.extraSpacing": {
           "type": "boolean",
           "default": true,
-          "description": "Add extra spacing between files in the output."
+          "description": "Add extra spacing between files in output."
         },
         "aggregateOpenTabs.enhancedSummaries": {
           "type": "boolean",
           "default": true,
-          "description": "Include enhanced file summaries in the output."
+          "description": "Generate enhanced file summaries with AI analysis."
+        },
+        "aggregateOpenTabs.chunkSize": {
+          "type": "number",
+          "default": 2000,
+          "description": "Maximum number of lines per chunk when splitting large files."
         },
         "aggregateOpenTabs.codeFenceLanguageMap": {
           "type": "object",
-          "default": {
-            "typescriptreact": "tsx",
-            "javascriptreact": "jsx",
-            "typescript": "ts",
-            "javascript": "js",
-            "markdown": "md"
-          },
-          "description": "Map of VS Code language IDs to code fence language identifiers."
+          "default": {},
+          "description": "Map of file extensions to code fence language identifiers."
         }
       }
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "compile": "tsc -p ./ && tsc -p ./media/tsconfig.json",
+    "watch": "tsc -watch -p ./ && tsc -watch -p ./media/tsconfig.json",
     "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src --ext ts",
+    "lint": "eslint src --ext ts && eslint media --ext ts",
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
@@ -170,6 +186,7 @@
     "@types/minimatch": "^5.1.2",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.10.6",
+    "@types/sinon": "^17.0.3",
     "@types/vscode": "^1.74.0",
     "@typescript-eslint/eslint-plugin": "^6.18.0",
     "@typescript-eslint/parser": "^6.18.0",
@@ -177,6 +194,7 @@
     "eslint": "^8.56.0",
     "minimatch": "^9.0.3",
     "mocha": "^10.8.2",
+    "sinon": "^19.0.2",
     "ts-mockito": "^2.6.1",
     "typescript": "^5.3.3"
   },
@@ -187,6 +205,9 @@
   "publisher": "hospedales",
   "dependencies": {
     "@types/node-fetch": "^2.6.12",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "@vscode/codicons": "^0.0.35",
+    "highlight.js": "^11.9.0",
+    "marked": "^11.1.1"
   }
 }

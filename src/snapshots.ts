@@ -246,18 +246,46 @@ export class SnapshotManager {
         oldAnalysis?: FileAnalysis,
         newAnalysis?: FileAnalysis
     ): boolean {
-        if (!oldAnalysis && !newAnalysis) return false;
-        if (!oldAnalysis || !newAnalysis) return true;
+        if (!oldAnalysis && !newAnalysis) {
+            return false;
+        }
+        if (!oldAnalysis || !newAnalysis) {
+            return true;
+        }
 
         // Compare relevant analysis fields
         return (
-            oldAnalysis.purpose !== newAnalysis.purpose ||
-            JSON.stringify(oldAnalysis.frameworks) !== JSON.stringify(newAnalysis.frameworks) ||
-            JSON.stringify(oldAnalysis.dependencies) !== JSON.stringify(newAnalysis.dependencies) ||
-            JSON.stringify(oldAnalysis.imports) !== JSON.stringify(newAnalysis.imports) ||
-            JSON.stringify(oldAnalysis.exports) !== JSON.stringify(newAnalysis.exports) ||
-            JSON.stringify(oldAnalysis.tags) !== JSON.stringify(newAnalysis.tags)
+            !this.areArraysEqual(oldAnalysis.frameworks || [], newAnalysis.frameworks || []) ||
+            !this.areArraysEqual(oldAnalysis.dependencies || [], newAnalysis.dependencies || []) ||
+            !this.areReferencesEqual(oldAnalysis.crossReferences, newAnalysis.crossReferences)
         );
+    }
+
+    private areReferencesEqual(
+        oldRefs?: FileAnalysis['crossReferences'],
+        newRefs?: FileAnalysis['crossReferences']
+    ): boolean {
+        if (!oldRefs && !newRefs) {
+            return true;
+        }
+        if (!oldRefs || !newRefs) {
+            return false;
+        }
+
+        return (
+            this.areArraysEqual(oldRefs.references, newRefs.references) &&
+            this.areArraysEqual(oldRefs.referencedBy, newRefs.referencedBy)
+        );
+    }
+
+    private areArraysEqual<T>(a: T[], b: T[]): boolean {
+        if (a === b) {
+            return true;
+        }
+        if (a.length !== b.length) {
+            return false;
+        }
+        return JSON.stringify(a) === JSON.stringify(b);
     }
 
     /**
@@ -297,7 +325,9 @@ export class SnapshotManager {
         const snapshots = await this.getSnapshots();
         const index = snapshots.findIndex(s => s.id === id);
         
-        if (index === -1) return false;
+        if (index === -1) {
+            return false;
+        }
         
         snapshots.splice(index, 1);
         await this.context.globalState.update(this.snapshotsKey, snapshots);
@@ -314,7 +344,9 @@ export class SnapshotManager {
         const snapshots = await this.getSnapshots();
         const snapshot = snapshots.find(s => s.id === id);
         
-        if (!snapshot) return false;
+        if (!snapshot) {
+            return false;
+        }
         
         if (updates.description !== undefined) {
             snapshot.description = updates.description;

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { FileMetadata, FileAnalysis } from './utils';
+import { FileMetadata, FileAnalysis } from './types';
 import { analyzeFile } from './analyzer';
 
 interface CacheEntry {
@@ -96,16 +96,7 @@ export class CacheManager {
         // Analyze the file
         this.reportProgress(`Analyzing ${document.fileName}`, 0);
         
-        const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
-        const analysis = await analyzeFile(document, {
-            tailored: config.get<boolean>('tailoredSummaries', true),
-            includeKeyPoints: config.get<boolean>('includeKeyPoints', true),
-            includeImports: config.get<boolean>('includeImports', true),
-            includeExports: config.get<boolean>('includeExports', true),
-            includeDependencies: config.get<boolean>('includeDependencies', true),
-            aiSummaryStyle: config.get('aiSummaryStyle', 'standard'),
-            includeCrossReferences: config.get<boolean>('includeCrossReferences', true)
-        });
+        const analysis = await analyzeFile(document);
 
         const metadata: FileMetadata = {
             fileName: document.fileName,

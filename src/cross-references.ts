@@ -1,7 +1,23 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { CrossReference, FileAnalysis } from './utils';
+import { FileAnalysis } from './utils';
+
+export interface CrossReference {
+    sourceFile: string;
+    targetFile: string;
+    type: 'import' | 'export' | 'dependency';
+    location: vscode.Position;
+    symbol?: string;
+    context?: string;
+}
+
+export function updateCrossReferences(references: CrossReference[]): CrossReference[] {
+    // Filter out any invalid references and ensure all required fields are present
+    return references.filter(ref => {
+        return ref.sourceFile && ref.targetFile && ref.type;
+    });
+}
 
 /**
  * Tracks and manages cross-references between files in the workspace
@@ -27,17 +43,22 @@ export class CrossReferenceTracker {
         
         for (const match of importMatches) {
             const [fullMatch, importPath] = match;
-            if (!importPath.startsWith('.')) continue; // Skip non-relative imports
+            if (!importPath.startsWith('.')) {
+                continue; // Skip non-relative imports
+            }
             
             const resolvedPath = this.resolveImportPath(filePath, importPath);
-            if (!resolvedPath) continue;
+            if (!resolvedPath) {
+                continue;
+            }
 
             references.push({
                 sourceFile: filePath,
                 targetFile: resolvedPath,
                 type: 'import',
                 location: document.positionAt(match.index!),
-                symbol: this.extractSymbols(fullMatch)
+                symbol: this.extractSymbols(fullMatch),
+                context: fullMatch
             });
         }
 

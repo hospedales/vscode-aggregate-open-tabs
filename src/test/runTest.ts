@@ -47,6 +47,7 @@ export function add(a: number, b: number): number {
 
         // Always recreate settings.json
         const settingsPath = path.join(vscodePath, 'settings.json');
+        /* eslint-disable @typescript-eslint/naming-convention */
         fs.writeFileSync(settingsPath, JSON.stringify({
             'files.exclude': {
                 '**/.git': true,
@@ -71,6 +72,7 @@ export function add(a: number, b: number): number {
                 'aggregateOpenTabs.cacheMemoryLimitMB': 100
             }
         }, null, 4));
+        /* eslint-enable @typescript-eslint/naming-convention */
 
         // Download VS Code, unzip it and run the integration test
         await runTests({ 

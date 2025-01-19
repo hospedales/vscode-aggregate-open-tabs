@@ -10,9 +10,17 @@ interface Snapshot {
     language: string;
 }
 
+interface GistFile {
+    content: string;
+}
+
 interface GistResponse {
-    html_url: string;
-    [key: string]: any;
+    htmlUrl: string;
+    files: Record<string, GistFile>;
+    description: string;
+    public: boolean;
+    createdAt: string;
+    updatedAt: string;
 }
 
 export class StorageManager {
@@ -109,8 +117,8 @@ export class StorageManager {
             const response = await fetch('https://api.github.com/gists', {
                 method: 'POST',
                 headers: {
-                    'Authorization': `token ${token}`,
-                    'Content-Type': 'application/json',
+                    authorization: `token ${token}`,
+                    contentType: 'application/json',
                 },
                 body: JSON.stringify({
                     description: 'Aggregated files from VS Code',
@@ -128,10 +136,10 @@ export class StorageManager {
             }
 
             const data = await response.json() as GistResponse;
-            vscode.window.showInformationMessage(`Gist created successfully! ${data.html_url}`);
+            vscode.window.showInformationMessage(`Gist created successfully! ${data.htmlUrl}`);
             
             // Open in browser
-            vscode.env.openExternal(vscode.Uri.parse(data.html_url));
+            vscode.env.openExternal(vscode.Uri.parse(data.htmlUrl));
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to create Gist: ${error instanceof Error ? error.message : String(error)}`);
         }

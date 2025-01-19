@@ -1,7 +1,5 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import * as vscode from 'vscode';
-import { AppliedTag } from './tags';
 
 export interface CrossReference {
     sourceFile: string;
@@ -11,32 +9,46 @@ export interface CrossReference {
         line: number;
         character: number;
     };
-    symbol?: string;  // The specific symbol being referenced
+    symbol?: string;
+    context?: string;
 }
 
 export interface FileAnalysis {
     purpose?: string;
-    frameworks: string[];
-    dependencies: string[];
-    imports: string[];
-    exports: string[];
-    aiSummary?: string;
-    keyPoints?: string[];
+    frameworks?: string[];
+    dependencies?: string[];
     crossReferences?: {
-        referencedBy: any[];
-        references: any[];
+        references: CrossReference[];
+        referencedBy: CrossReference[];
     };
-    tags?: AppliedTag[];
+    directoryContext?: {
+        parent: string;
+        siblings: string[];
+        children: string[];
+    };
+    complexity?: {
+        cognitive: number;
+        cyclomatic: number;
+        lines: number;
+    };
+    documentation?: {
+        comments: number;
+        jsdoc: number;
+        markdown: number;
+    };
+    security?: {
+        sensitivePatterns: string[];
+        dataAccess: string[];
+    };
 }
 
 export interface FileMetadata {
     fileName: string;
-    relativePath?: string;
+    relativePath: string;
     content: string;
     size: number;
     lastModified: string;
     languageId: string;
-    chunkInfo?: string;
     analysis?: FileAnalysis;
 }
 
@@ -51,35 +63,17 @@ export interface FileChunk {
 }
 
 export interface FormatOptions {
-    extraSpacing: boolean;
-    enhancedSummaries: boolean;
-    chunkSize: number;
-    includeAiSummaries?: boolean;
-    includeKeyPoints?: boolean;
-    includeImports?: boolean;
-    includeExports?: boolean;
-    includeDependencies?: boolean;
-    chunkSeparatorStyle?: 'double' | 'single' | 'minimal';
-    codeFenceLanguageMap?: Record<string, string>;
-    tailoredSummaries?: boolean;
+    extraSpacing?: boolean;
+    enhancedSummaries?: boolean;
+    chunkSize?: number;
+    codeFenceLanguageMap?: { [key: string]: string };
 }
 
 export function getFileMetadata(filePath: string, content: string, languageId: string): FileMetadata {
     const stats = fs.statSync(filePath);
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-    
-    // Normalize paths and ensure they use forward slashes
-    const normalizedWorkspace = path.normalize(workspaceRoot).split(path.sep).join('/');
-    const normalizedFilePath = path.normalize(filePath).split(path.sep).join('/');
-    
-    // Get the relative path by removing the workspace root
-    const relativePath = normalizedFilePath.startsWith(normalizedWorkspace) 
-        ? normalizedFilePath.slice(normalizedWorkspace.length + 1) 
-        : path.relative(normalizedWorkspace, normalizedFilePath).split(path.sep).join('/');
-    
     return {
         fileName: path.basename(filePath),
-        relativePath,
+        relativePath: filePath,
         content,
         size: stats.size,
         lastModified: stats.mtime.toISOString(),
@@ -87,57 +81,65 @@ export function getFileMetadata(filePath: string, content: string, languageId: s
         analysis: {
             frameworks: [],
             dependencies: [],
-            imports: [],
-            exports: []
+            crossReferences: {
+                references: [],
+                referencedBy: []
+            }
         }
     };
 }
 
 export function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes < 1024) {
+        return bytes + ' B';
+    }
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }
 
+// File extension to language mapping
+/* eslint-disable @typescript-eslint/naming-convention */
+const fileExtensionMap: { [key: string]: string } = {
+    '.js': 'javascript',
+    '.jsx': 'javascriptreact',
+    '.ts': 'typescript',
+    '.tsx': 'typescriptreact',
+    '.py': 'python',
+    '.java': 'java',
+    '.c': 'c',
+    '.cpp': 'cpp',
+    '.cs': 'csharp',
+    '.go': 'go',
+    '.rs': 'rust',
+    '.rb': 'ruby',
+    '.php': 'php',
+    '.swift': 'swift',
+    '.kt': 'kotlin',
+    '.scala': 'scala',
+    '.m': 'objective-c',
+    '.h': 'objective-c',
+    '.json': 'json',
+    '.xml': 'xml',
+    '.yaml': 'yaml',
+    '.yml': 'yaml',
+    '.md': 'markdown',
+    '.css': 'css',
+    '.scss': 'scss',
+    '.less': 'less',
+    '.html': 'html',
+    '.sql': 'sql',
+    '.sh': 'shellscript',
+    '.bash': 'shellscript',
+    '.zsh': 'shellscript',
+    '.ps1': 'powershell'
+};
+/* eslint-enable @typescript-eslint/naming-convention */
+
 export function getLanguageFromPath(filePath: string): string {
     const ext = path.extname(filePath).toLowerCase();
-    const languageMap: { [key: string]: string } = {
-        '.js': 'javascript',
-        '.jsx': 'javascriptreact',
-        '.ts': 'typescript',
-        '.tsx': 'typescriptreact',
-        '.py': 'python',
-        '.java': 'java',
-        '.c': 'c',
-        '.cpp': 'cpp',
-        '.cs': 'csharp',
-        '.go': 'go',
-        '.rs': 'rust',
-        '.rb': 'ruby',
-        '.php': 'php',
-        '.swift': 'swift',
-        '.kt': 'kotlin',
-        '.scala': 'scala',
-        '.m': 'objective-c',
-        '.h': 'c',
-        '.json': 'json',
-        '.xml': 'xml',
-        '.yaml': 'yaml',
-        '.yml': 'yaml',
-        '.md': 'markdown',
-        '.css': 'css',
-        '.scss': 'scss',
-        '.less': 'less',
-        '.html': 'html',
-        '.sql': 'sql',
-        '.sh': 'shell',
-        '.bash': 'shell',
-        '.zsh': 'shell',
-        '.ps1': 'powershell'
-    };
-    return languageMap[ext] || 'plaintext';
+    return fileExtensionMap[ext] || 'plaintext';
 }
 
 export function getFileExtension(fileName: string): string {

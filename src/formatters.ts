@@ -1,83 +1,65 @@
 import * as path from 'path';
-import { FileMetadata } from './utils';
-
-export interface FormatOptions {
-    extraSpacing?: boolean;
-    enhancedSummaries?: boolean;
-    chunkSize?: number;
-    chunkSeparatorStyle?: 'double' | 'single' | 'minimal';
-    codeFenceLanguageMap?: Record<string, string>;
-    tailoredSummaries?: boolean;
-    includeKeyPoints?: boolean;
-    includeImports?: boolean;
-    includeExports?: boolean;
-    includeDependencies?: boolean;
-    includeCrossReferences?: boolean;
-    includeTags?: boolean;
-    aiSummaryStyle?: 'minimal' | 'basic' | 'standard' | 'detailed' | 'comprehensive';
-    useCodeFences?: boolean;
-}
-
-interface FormatterOptions {
-    extraSpacing?: boolean;
-    enhancedSummaries?: boolean;
-    chunkSize?: number;
-    chunkSeparatorStyle?: 'double' | 'single' | 'minimal';
-    codeFenceLanguageMap?: Record<string, string>;
-    tailoredSummaries?: boolean;
-    includeKeyPoints?: boolean;
-    includeImports?: boolean;
-    includeExports?: boolean;
-    includeDependencies?: boolean;
-    includeCrossReferences?: boolean;
-    includeTags?: boolean;
-    aiSummaryStyle?: 'minimal' | 'basic' | 'standard' | 'detailed' | 'comprehensive';
-    useCodeFences?: boolean;
-}
+import { FileMetadata, CrossReference, FormatOptions } from './types';
 
 export abstract class BaseFormatter {
-    protected options: FormatterOptions;
     private memoizedChunks: Map<string, string[]> = new Map();
-    private static CHUNK_WORKERS = 4;
+    private static chunkWorkers = 4;
 
-    constructor(options: FormatOptions = {}) {
-        this.options = {
-            extraSpacing: options.extraSpacing ?? true,
-            enhancedSummaries: options.enhancedSummaries ?? true,
-            chunkSize: options.chunkSize ?? 2000,
-            chunkSeparatorStyle: options.chunkSeparatorStyle ?? 'double',
-            codeFenceLanguageMap: options.codeFenceLanguageMap ?? {},
-            tailoredSummaries: options.tailoredSummaries ?? true,
-            includeKeyPoints: options.includeKeyPoints ?? true,
-            includeImports: options.includeImports ?? true,
-            includeExports: options.includeExports ?? true,
-            includeDependencies: options.includeDependencies ?? true,
-            includeCrossReferences: options.includeCrossReferences ?? true,
-            includeTags: options.includeTags ?? true,
-            aiSummaryStyle: options.aiSummaryStyle ?? 'standard',
-            useCodeFences: options.useCodeFences ?? true
-        };
+    constructor(protected options: FormatOptions) {}
+
+    public async format(files: FileMetadata[]): Promise<string> {
+        const output: string[] = [];
+
+        // Add table of contents if there are multiple files
+        if (files.length > 1) {
+            output.push(await this.generateTableOfContents(files));
+            if (this.options.extraSpacing) {
+                output.push('');
+            }
+        }
+
+        // Process each file
+        for (const file of files) {
+            const chunks = await this.chunkContent(file.content, file.fileName);
+            for (let i = 0; i < chunks.length; i++) {
+                const isChunked = chunks.length > 1;
+                const chunkMeta = { 
+                    ...file,
+                    content: chunks[i],
+                    chunkInfo: isChunked ? ` (Chunk ${i + 1}/${chunks.length})` : ''
+                };
+
+                output.push(await this.generateFileHeader(chunkMeta));
+                output.push(await this.wrapContent(chunks[i], chunkMeta));
+                output.push(await this.generateFileFooter());
+                if (this.options.extraSpacing) {
+                    output.push('');
+                }
+            }
+        }
+
+        return output.join('\n');
     }
 
     protected abstract generateTableOfContents(files: FileMetadata[]): Promise<string>;
     protected abstract generateFileHeader(metadata: FileMetadata): Promise<string>;
-    protected abstract generateFileFooter(metadata: FileMetadata): Promise<string>;
+    protected abstract generateFileFooter(): Promise<string>;
     protected abstract wrapContent(content: string, metadata: FileMetadata): Promise<string>;
 
     protected getRelativePath(file: FileMetadata): string {
         return file.relativePath || file.fileName;
     }
 
-    protected getLanguageSpecificInfo(metadata: FileMetadata): string {
+    protected getLanguageSpecificInfo(file: FileMetadata): string {
         const info: string[] = [];
         
-        if (metadata.languageId === 'typescriptreact' || metadata.languageId === 'typescript') {
-            const hasUseClient = metadata.content.includes('use client');
+        if (file.languageId === 'typescriptreact' || file.languageId === 'typescript') {
+            const hasUseClient = file.content.includes('use client');
             info.push(hasUseClient ? 'Client Component' : 'Server Component');
         }
 
-        if (metadata.analysis?.frameworks && metadata.analysis.frameworks.length > 0) {
-            info.push(`Frameworks: ${metadata.analysis.frameworks.join(', ')}`);
+        if (file.analysis?.frameworks && file.analysis.frameworks.length > 0) {
+            info.push(`Frameworks: ${file.analysis.frameworks.join(', ')}`);
         }
 
         return info.join(' | ');
@@ -99,7 +81,7 @@ export abstract class BaseFormatter {
         // Process chunks in parallel for large files
         const lines = content.split('\n');
         const chunkCount = Math.ceil(lines.length / this.options.chunkSize);
-        const workerCount = Math.min(BaseFormatter.CHUNK_WORKERS, chunkCount);
+        const workerCount = Math.min(BaseFormatter.chunkWorkers, chunkCount);
         const chunksPerWorker = Math.ceil(chunkCount / workerCount);
 
         const chunkPromises = Array.from({ length: workerCount }, async (_, workerIndex) => {
@@ -177,40 +159,30 @@ export abstract class BaseFormatter {
         return defaultMap[languageId] || languageId;
     }
 
-    async format(files: FileMetadata[]): Promise<string> {
-        const toc = await this.generateTableOfContents(files);
-        const sections: string[] = [];
-
-        for (const file of files) {
-            const fileChunks = await this.chunkContent(file.content, file.fileName);
-            
-            for (let i = 0; i < fileChunks.length; i++) {
-                const isChunked = fileChunks.length > 1;
-                const chunkMeta = { 
-                    ...file,
-                    content: fileChunks[i],
-                    chunkInfo: isChunked ? ` (Chunk ${i + 1}/${fileChunks.length})` : ''
-                };
-
-                const section = [
-                    this.options.extraSpacing ? '\n\n' : '\n',
-                    await this.generateFileHeader(chunkMeta),
-                    this.options.extraSpacing ? '\n\n' : '\n',
-                    await this.wrapContent(fileChunks[i], chunkMeta),
-                    this.options.extraSpacing ? '\n\n' : '\n',
-                    await this.generateFileFooter(chunkMeta),
-                    this.options.extraSpacing ? '\n\n' : '\n'
-                ].join('');
-
-                sections.push(section);
-            }
-        }
-
-        return [toc, ...sections].join('\n');
-    }
-
     protected clearCache() {
         this.memoizedChunks.clear();
+    }
+
+    protected handleTags(tags: string[]): { scope: string; name: string }[] {
+        return tags.map(tag => {
+            const [scope = '', name = ''] = tag.split('/');
+            return { scope, name };
+        });
+    }
+
+    protected handleDependency(dep: { file: string; type: string }) {
+        const parts = dep.file.split('@');
+        return {
+            name: parts[0],
+            version: parts[1] || undefined
+        };
+    }
+
+    protected formatLocation(ref: CrossReference): string {
+        if (!ref.location) {
+            return '';
+        }
+        return ` - Line ${ref.location.line + 1}`;
     }
 }
 
@@ -254,7 +226,7 @@ export class PlainTextFormatter extends BaseFormatter {
                 }
                 if (file.analysis.keyPoints?.length) {
                     lines.push(`${indent}  Key Points:`);
-                    file.analysis.keyPoints.forEach(point => {
+                    file.analysis.keyPoints.forEach((point: string) => {
                         lines.push(`${indent}    • ${point}`);
                     });
                 }
@@ -355,7 +327,8 @@ export class PlainTextFormatter extends BaseFormatter {
                         lines.push('References:');
                         references.forEach(ref => {
                             const symbol = ref.symbol ? ` (${ref.symbol})` : '';
-                            lines.push(`  → ${ref.targetFile}${symbol} - Line ${ref.location.line + 1}`);
+                            const location = this.formatLocation(ref);
+                            lines.push(`  → ${ref.targetFile}${symbol}${location}`);
                             if (this.options.aiSummaryStyle === 'comprehensive' && ref.context) {
                                 lines.push(`    Context: ${ref.context}`);
                             }
@@ -363,11 +336,12 @@ export class PlainTextFormatter extends BaseFormatter {
                     }
                     
                     if (referencedBy.length > 0) {
-                        if (references.length > 0) lines.push('');
+                        if (references.length > 0) {lines.push('');}
                         lines.push('Referenced By:');
                         referencedBy.forEach(ref => {
                             const symbol = ref.symbol ? ` (${ref.symbol})` : '';
-                            lines.push(`  ← ${ref.sourceFile}${symbol} - Line ${ref.location.line + 1}`);
+                            const location = this.formatLocation(ref);
+                            lines.push(`  ← ${ref.sourceFile}${symbol}${location}`);
                             if (this.options.aiSummaryStyle === 'comprehensive' && ref.context) {
                                 lines.push(`    Context: ${ref.context}`);
                             }
@@ -385,7 +359,7 @@ export class PlainTextFormatter extends BaseFormatter {
         return Promise.resolve(lines.join('\n'));
     }
 
-    protected generateFileFooter(_metadata: FileMetadata): Promise<string> {
+    protected generateFileFooter(): Promise<string> {
         const separator = this.getSeparator(this.options.chunkSeparatorStyle);
         return Promise.resolve(`\n//${separator}\n\n`);
     }
@@ -476,8 +450,9 @@ export class MarkdownFormatter extends BaseFormatter {
                 }
                 if (dir !== '.') {
                     // Add directory tags if any
-                    const dirTags = file.analysis?.tags?.filter(t => t.scope === 'directory');
-                    const tagStr = dirTags?.length 
+                    const dirTags = file.analysis?.tags ? this.handleTags(file.analysis.tags)
+                        .filter(t => t.scope === 'directory') : [];
+                    const tagStr = dirTags.length 
                         ? ` *(${dirTags.map(t => t.name).join(', ')})*`
                         : '';
                     lines.push(`<details open><summary>📁 ${dir}/${tagStr}</summary>\n`);
@@ -496,8 +471,9 @@ export class MarkdownFormatter extends BaseFormatter {
             if (file.analysis?.frameworks?.length) {
                 metadata.push(`Uses: ${file.analysis.frameworks.join(', ')}`);
             }
-            if (this.options.includeTags && file.analysis?.tags?.length) {
-                const fileTags = file.analysis.tags.filter(t => t.scope !== 'directory');
+            if (this.options.includeTags && file.analysis?.tags) {
+                const fileTags = this.handleTags(file.analysis.tags)
+                    .filter(t => t.scope !== 'directory');
                 if (fileTags.length) {
                     metadata.push(`Tags: ${fileTags.map(t => t.name).join(', ')}`);
                 }
@@ -534,7 +510,7 @@ export class MarkdownFormatter extends BaseFormatter {
             .replace(/(^-|-$)/g, '');
     }
 
-    protected generateFileHeader(metadata: FileMetadata): Promise<string> {
+    protected async generateFileHeader(metadata: FileMetadata): Promise<string> {
         const lines: string[] = [];
         const relativePath = this.getRelativePath(metadata);
 
@@ -581,12 +557,84 @@ export class MarkdownFormatter extends BaseFormatter {
                 (this.options.aiSummaryStyle === 'detailed' || this.options.aiSummaryStyle === 'comprehensive')) {
                 lines.push(`| Exports | ${metadata.analysis.exports.join(', ')} |`);
             }
+
+            // Add complexity metrics for detailed and comprehensive
+            if (metadata.analysis.complexity && 
+                (this.options.aiSummaryStyle === 'detailed' || this.options.aiSummaryStyle === 'comprehensive')) {
+                lines.push(
+                    `| Complexity | Cognitive: ${metadata.analysis.complexity.cognitive}, Cyclomatic: ${metadata.analysis.complexity.cyclomatic} |`,
+                    `| Functions | ${metadata.analysis.complexity.functions} |`,
+                    `| Lines | ${metadata.analysis.complexity.lines} |`
+                );
+            }
+
+            // Add documentation metrics for detailed and comprehensive
+            if (metadata.analysis.documentation && 
+                (this.options.aiSummaryStyle === 'detailed' || this.options.aiSummaryStyle === 'comprehensive')) {
+                lines.push(
+                    `| Documentation | ${metadata.analysis.documentation.comments} comments, ${metadata.analysis.documentation.jsdoc} JSDoc blocks |`,
+                    `| Documentation Files | ${[
+                        metadata.analysis.documentation.readme && 'README',
+                        metadata.analysis.documentation.license && 'LICENSE'
+                    ].filter(Boolean).join(', ') || 'None'} |`
+                );
+            }
+
+            // Add security information for comprehensive only
+            if (metadata.analysis.security && this.options.aiSummaryStyle === 'comprehensive') {
+                if (metadata.analysis.security.sensitivePatterns?.length) {
+                    lines.push(`| ⚠️ Security | Contains potentially sensitive patterns |`);
+                }
+                if (metadata.analysis.security.authRelated) {
+                    lines.push(`| 🔒 Auth | Contains authentication-related code |`);
+                }
+                if (metadata.analysis.security.dataAccess) {
+                    lines.push(`| 💾 Data | Contains data access operations |`);
+                }
+            }
         }
         lines.push('\n</details>');
 
         // Add extra spacing after metadata section if enabled
         if (this.options.extraSpacing) {
             lines.push('');
+        }
+
+        // Add relationships section for detailed and comprehensive
+        if (metadata.analysis?.relationships && 
+            (this.options.aiSummaryStyle === 'detailed' || this.options.aiSummaryStyle === 'comprehensive')) {
+            lines.push('<details><summary>File Relationships</summary>\n');
+
+            if (metadata.analysis.relationships.imports.length > 0) {
+                lines.push('**Imports:**');
+                metadata.analysis.relationships.imports.forEach(imp => {
+                    lines.push(`- \`${imp.file}\`${imp.symbols.length ? ` (${imp.symbols.join(', ')})` : ''}`);
+                });
+                lines.push('');
+            }
+
+            if (metadata.analysis.relationships.exports.length > 0) {
+                lines.push('**Exports:**');
+                metadata.analysis.relationships.exports.forEach(exp => {
+                    lines.push(`- \`${exp.file}\`${exp.symbols.length ? ` (${exp.symbols.join(', ')})` : ''}`);
+                });
+                lines.push('');
+            }
+
+            if (metadata.analysis.relationships.dependencies.length > 0) {
+                lines.push('**Dependencies:**');
+                metadata.analysis.relationships.dependencies.forEach(dep => {
+                    const { name, version } = this.handleDependency(dep);
+                    lines.push(`- \`${name}\`${version ? ` @ ${version}` : ''}`);
+                });
+            }
+
+            lines.push('\n</details>');
+
+            // Add extra spacing after relationships if enabled
+            if (this.options.extraSpacing) {
+                lines.push('');
+            }
         }
 
         // Add AI summary and key points with depth-based formatting
@@ -642,7 +690,8 @@ export class MarkdownFormatter extends BaseFormatter {
                     lines.push('**References:**');
                     references.forEach(ref => {
                         const symbol = ref.symbol ? ` (${ref.symbol})` : '';
-                        lines.push(`- → \`${ref.targetFile}\`${symbol} - Line ${ref.location.line + 1}`);
+                        const location = this.formatLocation(ref);
+                        lines.push(`- → \`${ref.targetFile}\`${symbol}${location}`);
                         if (this.options.aiSummaryStyle === 'comprehensive' && ref.context) {
                             lines.push(`  - Context: ${ref.context}`);
                         }
@@ -650,11 +699,12 @@ export class MarkdownFormatter extends BaseFormatter {
                 }
                 
                 if (referencedBy.length > 0) {
-                    if (references.length > 0) lines.push('');
+                    if (references.length > 0) {lines.push('');}
                     lines.push('**Referenced By:**');
                     referencedBy.forEach(ref => {
                         const symbol = ref.symbol ? ` (${ref.symbol})` : '';
-                        lines.push(`- ← \`${ref.sourceFile}\`${symbol} - Line ${ref.location.line + 1}`);
+                        const location = this.formatLocation(ref);
+                        lines.push(`- ← \`${ref.sourceFile}\`${symbol}${location}`);
                         if (this.options.aiSummaryStyle === 'comprehensive' && ref.context) {
                             lines.push(`  - Context: ${ref.context}`);
                         }
@@ -669,14 +719,10 @@ export class MarkdownFormatter extends BaseFormatter {
             }
         }
 
-        // Add code block header with proper language identifier
-        const langId = this.getLanguageIdentifier(metadata.languageId);
-        lines.push(`\`\`\`${langId}`);
-        
-        return Promise.resolve(lines.join('\n'));
+        return lines.join('\n');
     }
 
-    protected generateFileFooter(_metadata: FileMetadata): Promise<string> {
+    protected generateFileFooter(): Promise<string> {
         return Promise.resolve('```\n');
     }
 
@@ -938,7 +984,8 @@ export class HtmlFormatter extends BaseFormatter {
                     lines.push('<ul>');
                     references.forEach(ref => {
                         const symbol = ref.symbol ? ` (${ref.symbol})` : '';
-                        lines.push(`<li class="reference">→ <code>${ref.targetFile}</code>${symbol} - Line ${ref.location.line + 1}`);
+                        const location = this.formatLocation(ref);
+                        lines.push(`<li class="reference">→ <code>${ref.targetFile}</code>${symbol}${location}`);
                         if (this.options.aiSummaryStyle === 'comprehensive' && ref.context) {
                             lines.push(`<div class="context">Context: ${ref.context}</div>`);
                         }
@@ -954,7 +1001,8 @@ export class HtmlFormatter extends BaseFormatter {
                     lines.push('<ul>');
                     referencedBy.forEach(ref => {
                         const symbol = ref.symbol ? ` (${ref.symbol})` : '';
-                        lines.push(`<li class="reference">← <code>${ref.sourceFile}</code>${symbol} - Line ${ref.location.line + 1}`);
+                        const location = this.formatLocation(ref);
+                        lines.push(`<li class="reference">← <code>${ref.sourceFile}</code>${symbol}${location}`);
                         if (this.options.aiSummaryStyle === 'comprehensive' && ref.context) {
                             lines.push(`<div class="context">Context: ${ref.context}</div>`);
                         }
@@ -992,7 +1040,7 @@ export class HtmlFormatter extends BaseFormatter {
         return Promise.resolve(lines.join('\n'));
     }
 
-    protected generateFileFooter(_metadata: FileMetadata): Promise<string> {
+    protected generateFileFooter(): Promise<string> {
         return Promise.resolve('</div>\n<hr>\n');
     }
 

@@ -2,13 +2,14 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { analyzeFile } from './analyzer';
 import { FileMetadata } from './utils';
+import { FileAnalysis } from './types';
 
 export class FileTreeItem extends vscode.TreeItem {
     constructor(
         public readonly document: vscode.TextDocument,
         public readonly collapsibleState: vscode.TreeItemCollapsibleState,
         public readonly metadata?: FileMetadata,
-        public readonly analysis?: any
+        public readonly analysis?: FileAnalysis
     ) {
         super(path.basename(document.fileName), collapsibleState);
 
@@ -30,18 +31,22 @@ export class FileTreeItem extends vscode.TreeItem {
     private generateTooltip(): string {
         const parts = [this.document.fileName];
         
-        if (this.analysis) {
-            if (this.analysis.frameworks.length > 0) {
-                parts.push(`Frameworks: ${this.analysis.frameworks.join(', ')}`);
-            }
-            parts.push(`Purpose: ${this.analysis.purpose}`);
-            if (this.analysis.exports.length > 0) {
-                parts.push(`Exports: ${this.analysis.exports.join(', ')}`);
-            }
+        const analysis = this.analysis;
+        if (!analysis) {
+            return parts.join('\n');
         }
 
-        if (this.metadata?.analysis?.aiSummary) {
-            parts.push(this.metadata.analysis.aiSummary);
+        if (analysis.frameworks && analysis.frameworks.length > 0) {
+            parts.push(`Frameworks: ${analysis.frameworks.join(', ')}`);
+        }
+        if (analysis.purpose) {
+            parts.push(`Purpose: ${analysis.purpose}`);
+        }
+        if (analysis.dependencies && analysis.dependencies.length > 0) {
+            parts.push(`Dependencies: ${analysis.dependencies.join(', ')}`);
+        }
+        if (analysis.aiSummary) {
+            parts.push(analysis.aiSummary);
         }
 
         return parts.join('\n');
@@ -86,7 +91,7 @@ export class EnhancedTreeProvider implements
     }
 
     // Handle drag
-    public async handleDrag(source: readonly (FileTreeItem | PreviewTreeItem)[], dataTransfer: vscode.DataTransfer, _token: vscode.CancellationToken): Promise<void> {
+    public async handleDrag(source: readonly (FileTreeItem | PreviewTreeItem)[], dataTransfer: vscode.DataTransfer): Promise<void> {
         if (source.length === 0 || !(source[0] instanceof FileTreeItem)) {
             return;
         }
@@ -96,7 +101,7 @@ export class EnhancedTreeProvider implements
     }
 
     // Handle drop
-    public async handleDrop(target: FileTreeItem | PreviewTreeItem | undefined, dataTransfer: vscode.DataTransfer, _token: vscode.CancellationToken): Promise<void> {
+    public async handleDrop(target: FileTreeItem | PreviewTreeItem | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
         const transferItem = dataTransfer.get('application/vnd.code.tree.aggregateOpenTabsView');
         if (!transferItem || !target || !(target instanceof FileTreeItem)) {
             return;
@@ -152,9 +157,15 @@ export class EnhancedTreeProvider implements
             ? openDocuments.sort((a, b) => {
                 const indexA = this.fileOrder.indexOf(a.fileName);
                 const indexB = this.fileOrder.indexOf(b.fileName);
-                if (indexA === -1 && indexB === -1) return a.fileName.localeCompare(b.fileName);
-                if (indexA === -1) return 1;
-                if (indexB === -1) return -1;
+                if (indexA === -1 && indexB === -1) {
+                    return a.fileName.localeCompare(b.fileName);
+                }
+                if (indexA === -1) {
+                    return 1;
+                }
+                if (indexB === -1) {
+                    return -1;
+                }
                 return indexA - indexB;
             })
             : openDocuments.sort((a, b) => a.fileName.localeCompare(b.fileName));

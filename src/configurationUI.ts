@@ -1,9 +1,16 @@
 import * as vscode from 'vscode';
 
-interface ConfigurationPanelMessage {
-    command: string;
-    value?: any;
+interface UpdateSettingMessage {
+    command: 'updateSetting';
+    value: { key: string; value: unknown };
 }
+
+interface ErrorMessage {
+    command: 'showError';
+    value: string;
+}
+
+type ConfigurationPanelMessage = UpdateSettingMessage | ErrorMessage;
 
 export class ConfigurationPanel {
     public static currentPanel: ConfigurationPanel | undefined;

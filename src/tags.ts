@@ -105,7 +105,9 @@ export class TagManager {
      */
     public applyTag(tagId: string, targetPath: string): AppliedTag | undefined {
         const tag = this.tags.get(tagId);
-        if (!tag) return undefined;
+        if (!tag) {
+            return undefined;
+        }
 
         const relativePath = this.getRelativePath(targetPath);
         const isDirectory = fs.statSync(path.join(this.workspaceRoot, relativePath)).isDirectory();
