@@ -221,6 +221,8 @@
   },
   "publisher": "hospedales",
   "dependencies": {
+    "@octokit/openapi-types": "^19.1.0",
+    "@octokit/rest": "^20.1.1",
     "@types/node-fetch": "^2.6.12",
     "@vscode/codicons": "^0.0.35",
     "highlight.js": "^11.11.1",

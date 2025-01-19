@@ -4,6 +4,29 @@ import { analyzeFile } from './analyzer';
 import { minimatch } from 'minimatch';
 
 export class AggregationService {
+    // Security patterns for sensitive data detection
+    private readonly sensitivePatterns: Record<string, RegExp> = {
+        apiKey: /(api[_-]?key|api[_-]?token|access[_-]?token)['"]?\s*[:=]\s*['"]([^'"]+)['"]/i,
+        password: /(password|passwd|pwd)['"]?\s*[:=]\s*['"]([^'"]+)['"]/i,
+        privateKey: /-----BEGIN [A-Z ]+ PRIVATE KEY-----/,
+        envVar: /\.env/i
+    };
+
+    // Binary file extensions to ignore
+    private readonly binaryExtensions = new Set([
+        // Documents
+        'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+        // Archives
+        'zip', 'tar', 'gz', 'rar', '7z',
+        // Executables
+        'exe', 'dll', 'so', 'dylib',
+        // Media
+        'jpg', 'jpeg', 'png', 'gif', 'bmp', 'ico',
+        'mp3', 'mp4', 'wav', 'avi', 'mov',
+        // Database
+        'db', 'sqlite', 'mdb'
+    ]);
+
     constructor() {}
 
     async aggregateFiles(documents: readonly vscode.TextDocument[], options: FormatOptions): Promise<string> {
@@ -13,11 +36,23 @@ export class AggregationService {
         const excludePatterns = config.get<string[]>('excludePatterns', [
             '**/*.env',
             '**/*.lock',
-            '**/node_modules/**'
+            '**/node_modules/**',
+            '**/dist/**',
+            '**/build/**',
+            '**/__pycache__/**',
+            '**/.git/**',
+            '**/coverage/**'
         ]);
 
-        // Filter documents based on configuration
+        // Filter documents based on configuration and binary files
         const filteredDocs = documents.filter(doc => {
+            const ext = doc.fileName.split('.').pop()?.toLowerCase() || '';
+            
+            // Skip binary files
+            if (this.binaryExtensions.has(ext)) {
+                return false;
+            }
+
             // Check if file type is included (if include list is not empty)
             if (includeTypes.length > 0) {
                 const ext = doc.fileName.split('.').pop() || '';
@@ -45,15 +80,21 @@ export class AggregationService {
         // First pass: collect metadata and analyze files
         for (const doc of filteredDocs) {
             if (doc.uri.scheme === 'file') {
-                const content = doc.getText();
+                let processedContent = doc.getText();
+                
+                // Check for sensitive data if redaction is enabled
+                if (options.redactSensitiveData) {
+                    processedContent = this.redactSensitiveData(processedContent);
+                }
+
                 const analysis = await analyzeFile(doc);
                 analyses.set(doc.fileName, analysis);
 
                 metadata.push({
                     fileName: doc.fileName,
-                    relativePath: vscode.workspace.asRelativePath(doc.uri),
-                    content,
-                    size: Buffer.from(content).length,
+                    relativePath: vscode.workspace.asRelativePath(doc.fileName),
+                    content: processedContent,
+                    size: Buffer.from(processedContent).length,
                     lastModified: new Date().toISOString(),
                     languageId: doc.languageId,
                     analysis
@@ -226,5 +267,18 @@ export class AggregationService {
         }
 
         return `${size.toFixed(1)} ${units[unitIndex]}`;
+    }
+
+    private redactSensitiveData(content: string): string {
+        let redactedContent = content;
+
+        // Apply each sensitive pattern
+        Object.entries(this.sensitivePatterns).forEach(([, pattern]) => {
+            redactedContent = redactedContent.replace(pattern, (_, prefix) => {
+                return `${prefix}=[REDACTED]`;
+            });
+        });
+
+        return redactedContent;
     }
 }

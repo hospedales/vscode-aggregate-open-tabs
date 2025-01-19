@@ -89,4 +89,5 @@ export interface FormatOptions {
     includeCrossReferences?: boolean;
     includeTags?: boolean;
     aiSummaryStyle?: 'minimal' | 'basic' | 'standard' | 'detailed' | 'comprehensive';
+    redactSensitiveData?: boolean;
 } 
