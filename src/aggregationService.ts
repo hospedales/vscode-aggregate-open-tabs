@@ -2,283 +2,218 @@ import * as vscode from 'vscode';
 import { FileMetadata, FormatOptions, FileAnalysis } from './types';
 import { analyzeFile } from './analyzer';
 import { minimatch } from 'minimatch';
+import { getActiveEditor, getActiveEditorLanguageId, getActiveEditorText } from './utils';
+
+interface AggregationResult {
+	[key: string]: number;
+}
+
+export async function aggregateWords(): Promise<AggregationResult | undefined> {
+	const editor = getActiveEditor();
+	if (!editor) {
+		vscode.window.showErrorMessage('No active editor found.');
+		return;
+	}
+
+	const languageId = getActiveEditorLanguageId(editor);
+	if (!languageId) {
+		vscode.window.showErrorMessage('Could not determine language of active editor.');
+		return;
+	}
+
+	const text = getActiveEditorText(editor);
+	if (!text) {
+		vscode.window.showErrorMessage('No text in active editor.');
+		return;
+	}
+
+	const words = text.split(/\s+/).filter(Boolean);
+	const wordCounts: AggregationResult = {};
+
+	for (const word of words) {
+		const normalizedWord = word.toLowerCase();
+		wordCounts[normalizedWord] = (wordCounts[normalizedWord] || 0) + 1;
+	}
+
+	return wordCounts;
+}
 
 export class AggregationService {
-    // Security patterns for sensitive data detection
-    private readonly sensitivePatterns: Record<string, RegExp> = {
-        apiKey: /(api[_-]?key|api[_-]?token|access[_-]?token)['"]?\s*[:=]\s*['"]([^'"]+)['"]/i,
-        password: /(password|passwd|pwd)['"]?\s*[:=]\s*['"]([^'"]+)['"]/i,
-        privateKey: /-----BEGIN [A-Z ]+ PRIVATE KEY-----/,
-        envVar: /\.env/i
-    };
+	// Binary file extensions to ignore
+	private readonly binaryExtensions = new Set([
+		// Documents
+		'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+		// Archives
+		'zip', 'tar', 'gz', 'rar', '7z',
+		// Executables
+		'exe', 'dll', 'so', 'dylib',
+		// Media
+		'jpg', 'jpeg', 'png', 'gif', 'bmp', 'ico',
+		'mp3', 'mp4', 'wav', 'avi', 'mov',
+		// Database
+		'db', 'sqlite', 'mdb'
+	]);
 
-    // Binary file extensions to ignore
-    private readonly binaryExtensions = new Set([
-        // Documents
-        'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
-        // Archives
-        'zip', 'tar', 'gz', 'rar', '7z',
-        // Executables
-        'exe', 'dll', 'so', 'dylib',
-        // Media
-        'jpg', 'jpeg', 'png', 'gif', 'bmp', 'ico',
-        'mp3', 'mp4', 'wav', 'avi', 'mov',
-        // Database
-        'db', 'sqlite', 'mdb'
-    ]);
+	constructor() {}
 
-    constructor() {}
+	async aggregateFiles(documents: readonly vscode.TextDocument[], options: FormatOptions): Promise<string> {
+		const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
+		const includeTypes = config.get<string[]>('includeFileTypes', []);
+		const excludeTypes = config.get<string[]>('excludeFileTypes', []);
+		const excludePatterns = config.get<string[]>('excludePatterns', [
+			'**/*.env',
+			'**/*.lock',
+			'**/node_modules/**',
+			'**/out/**',
+			'**/dist/**',
+			'**/.vscode/**',
+			'**/.git/**'
+		]);
 
-    async aggregateFiles(documents: readonly vscode.TextDocument[], options: FormatOptions): Promise<string> {
-        const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
-        const includeTypes = config.get<string[]>('includeFileTypes', []);
-        const excludeTypes = config.get<string[]>('excludeFileTypes', []);
-        const excludePatterns = config.get<string[]>('excludePatterns', [
-            '**/*.env',
-            '**/*.lock',
-            '**/node_modules/**',
-            '**/dist/**',
-            '**/build/**',
-            '**/__pycache__/**',
-            '**/.git/**',
-            '**/coverage/**'
-        ]);
+		// Filter documents based on configuration
+		const filteredDocs = documents.filter(doc => {
+			// Check if file type is included (if include list is not empty)
+			// The '*' wildcard in includeTypes means include all file types
+			if (includeTypes.length > 0) {
+				const ext = doc.fileName.split('.').pop() || '';
+				if (!includeTypes.includes(ext) && !includeTypes.includes('*')) {
+					return false;
+				}
+			}
 
-        // Filter documents based on configuration and binary files
-        const filteredDocs = documents.filter(doc => {
-            const ext = doc.fileName.split('.').pop()?.toLowerCase() || '';
-            
-            // Skip binary files
-            if (this.binaryExtensions.has(ext)) {
-                return false;
-            }
+			// Check if file type is excluded
+			if (excludeTypes.some(type => doc.fileName.endsWith(`.${type}`))) {
+				return false;
+			}
 
-            // Check if file type is included (if include list is not empty)
-            if (includeTypes.length > 0) {
-                const ext = doc.fileName.split('.').pop() || '';
-                if (!includeTypes.includes(ext) && !includeTypes.includes('*')) {
-                    return false;
-                }
-            }
+			// Check if file path matches any exclude patterns
+			if (excludePatterns.some(pattern => minimatch(doc.fileName, pattern))) {
+				return false;
+			}
 
-            // Check if file type is excluded
-            if (excludeTypes.length > 0) {
-                const ext = doc.fileName.split('.').pop() || '';
-                if (excludeTypes.includes(ext)) {
-                    return false;
-                }
-            }
+			// Check if the file is a binary file based on its extension
+			const fileExtension = doc.fileName.split('.').pop()?.toLowerCase() || '';
+			if (this.binaryExtensions.has(fileExtension)) {
+				return false;
+			}
 
-            // Check exclude patterns
-            const relativePath = vscode.workspace.asRelativePath(doc.fileName);
-            return !excludePatterns.some(pattern => minimatch(relativePath, pattern));
-        });
+			return true;
+		});
 
-        const metadata: FileMetadata[] = [];
-        const analyses: Map<string, FileAnalysis> = new Map();
+		const files: FileMetadata[] = await Promise.all(
+			filteredDocs.map(async doc => {
+				const fileContent = doc.getText();
+				const relativePath = vscode.workspace.asRelativePath(doc.uri);
+				const fileExtension = doc.fileName.split('.').pop()?.toLowerCase() || '';
+				const isBinary = this.binaryExtensions.has(fileExtension);
 
-        // First pass: collect metadata and analyze files
-        for (const doc of filteredDocs) {
-            if (doc.uri.scheme === 'file') {
-                let processedContent = doc.getText();
-                
-                // Check for sensitive data if redaction is enabled
-                if (options.redactSensitiveData) {
-                    processedContent = this.redactSensitiveData(processedContent);
-                }
+				let analysis: FileAnalysis | undefined;
+				if (!isBinary) {
+					analysis = await analyzeFile(doc);
+				}
 
-                const analysis = await analyzeFile(doc);
-                analyses.set(doc.fileName, analysis);
+				return {
+					fileName: doc.fileName.split('/').pop() || '',
+					relativePath,
+					uri: doc.uri,
+					languageId: doc.languageId,
+					content: fileContent,
+					isBinary: isBinary,
+					size: fileContent.length,
+					lastModified: new Date().toISOString(),
+					analysis: analysis
+				};
+			})
+		);
 
-                metadata.push({
-                    fileName: doc.fileName,
-                    relativePath: vscode.workspace.asRelativePath(doc.fileName),
-                    content: processedContent,
-                    size: Buffer.from(processedContent).length,
-                    lastModified: new Date().toISOString(),
-                    languageId: doc.languageId,
-                    analysis
-                });
-            }
-        }
+		return this.formatAggregatedFiles(files, options);
+	}
 
-        // Second pass: update cross-references and enhance analysis
-        for (const file of metadata) {
-            if (file.analysis?.crossReferences) {
-                const refs = file.analysis.crossReferences;
-                refs.references = refs.references.filter(ref => 
-                    metadata.some(m => m.fileName === ref.file || m.relativePath === ref.file)
-                );
-                refs.referencedBy = refs.referencedBy.filter(ref => 
-                    metadata.some(m => m.fileName === ref.file || m.relativePath === ref.file)
-                );
+	private formatAggregatedFiles(files: FileMetadata[], options: FormatOptions): string {
+		const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
+		const enableChunking = config.get<boolean>('enableChunking', false);
+		const maxChunkSize = config.get<number>('chunkSize', 2000);
 
-                // Add enhanced analysis
-                if (file.analysis?.frameworks && file.analysis.frameworks.length > 0) {
-                    file.analysis.frameworkDetails = await this.analyzeFrameworks(file.analysis.frameworks, file.content);
-                }
-                
-                if (options.enhancedSummaries) {
-                    file.analysis.aiSummary = await this.generateAISummary(file.content, file.languageId);
-                }
-            }
-        }
+		let output = '';
 
-        return this.formatOutput(metadata, options);
-    }
+		// Sort files by relative path for consistent output
+		files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 
-    private async analyzeFrameworks(frameworks: string[], content: string): Promise<Record<string, unknown>> {
-        const details: Record<string, unknown> = {};
-        for (const framework of frameworks) {
-            switch (framework.toLowerCase()) {
-                case 'react':
-                    details.react = {
-                        hooks: this.detectReactHooks(content),
-                        components: this.detectReactComponents(content)
-                    };
-                    break;
-                case 'next.js':
-                    details.nextjs = {
-                        isServerComponent: !content.includes('use client'),
-                        routes: this.detectNextRoutes(content)
-                    };
-                    break;
-                // Add more framework-specific analysis as needed
-            }
-        }
-        return details;
-    }
+		// Add header with timestamp
+		output += `# Aggregated Files Report - ${new Date().toLocaleString()}\n\n`;
 
-    private detectReactHooks(content: string): string[] {
-        const hookPattern = /use[A-Z]\w+/g;
-        return [...new Set(content.match(hookPattern) || [])];
-    }
+		// Add table of contents
+		output += `## Table of Contents\n\n`;
+		files.forEach(file => {
+			output += `- [${file.relativePath}](#${file.relativePath.replace(/ /g, '-').toLowerCase()})\n`;
+		});
+		output += '\n';
 
-    private detectReactComponents(content: string): string[] {
-        const componentPattern = /(?:export\s+(?:default\s+)?)?(?:function|const)\s+([A-Z]\w+)/g;
-        const components: string[] = [];
-        let match;
-        while ((match = componentPattern.exec(content)) !== null) {
-            components.push(match[1]);
-        }
-        return components;
-    }
+		// Add individual file sections
+		files.forEach(file => {
+			output += `\n## ${file.relativePath}\n`;
 
-    private detectNextRoutes(content: string): string[] {
-        const routePattern = /(?:page|layout|loading|error|not-found)\.(?:tsx?|jsx?)$/;
-        if (routePattern.test(content)) {
-            return [content.split('/').pop() || ''];
-        }
-        return [];
-    }
+			// Add file metadata
+			if (options.enhancedSummaries && file.analysis) {
+				output += '```yaml\n';
+				output += `language: ${file.languageId}\n`;
+				output += `size: ${this.formatSize(file.size)}\n`;
+				if (file.analysis.frameworks && file.analysis.frameworks.length > 0) {
+					output += `frameworks: ${file.analysis.frameworks.join(', ')}\n`;
+				}
+				if (file.analysis.aiSummary) {
+					output += `summary: ${file.analysis.aiSummary}\n`;
+				}
+				output += '```\n';
+			}
 
-    private async generateAISummary(content: string, languageId: string): Promise<string> {
-        // This would integrate with an AI service in production
-        // For now, return a basic summary based on content analysis
-        const lines = content.split('\n').length;
-        const imports = (content.match(/import\s+.*?from/g) || []).length;
-        const exports = (content.match(/export\s+/g) || []).length;
-        
-        return `${languageId.toUpperCase()} file with ${lines} lines, ${imports} imports, and ${exports} exports.`;
-    }
+			// Add file content with proper code fence
+			const lang = options.codeFenceLanguageMap?.[file.languageId] || file.languageId;
 
-    private formatOutput(files: FileMetadata[], options: FormatOptions): string {
-        const output: string[] = ['# Aggregated Files\n'];
+			if (enableChunking && file.content.length > maxChunkSize) {
+				// Split content into chunks
+				const chunks = this.chunkContent(file.content, maxChunkSize);
+				chunks.forEach((chunk, index) => {
+					output += `\`\`\`${lang} (Chunk ${index + 1}/${chunks.length})\n`;
+					output += chunk;
+					output += '\n```';
+					if (options.extraSpacing) {
+						output += '\n';
+					}
+				});
+			} else {
+				// Add entire content as a single chunk
+				output += `\`\`\`${lang}\n`;
+				output += file.content;
+				output += '\n```';
+				if (options.extraSpacing) {
+					output += '\n';
+				}
+			}
+		});
 
-        // Add summary section
-        output.push('## Summary\n');
-        output.push('```yaml');
-        output.push(`total_files: ${files.length}`);
-        output.push(`total_size: ${this.formatSize(files.reduce((sum, f) => sum + f.size, 0))}`);
-        output.push(`languages: ${Array.from(new Set(files.map(f => f.languageId))).join(', ')}`);
+		return output;
+	}
 
-        // Add framework summary if available
-        const frameworks = new Set<string>();
-        files.forEach(f => {
-            if (f.analysis?.frameworks) {
-                f.analysis.frameworks.forEach(fw => frameworks.add(fw));
-            }
-        });
-        if (frameworks.size > 0) {
-            output.push(`frameworks: ${Array.from(frameworks).join(', ')}`);
-        }
-        output.push('```\n');
+	private formatSize(bytes: number): string {
+		const units = ['B', 'KB', 'MB', 'GB'];
+		let size = bytes;
+		let unitIndex = 0;
 
-        // Add cross-reference section if enabled
-        if (options.enhancedSummaries) {
-            output.push('\n## Cross References\n');
-            files.forEach(file => {
-                const refs = file.analysis?.crossReferences;
-                if (refs && (refs.references.length > 0 || refs.referencedBy.length > 0)) {
-                    output.push(`### ${file.relativePath}\n`);
-                    if (refs.references.length > 0) {
-                        output.push('**References:**\n');
-                        refs.references.forEach(ref => output.push(`- ${ref.file} (${ref.type})`));
-                    }
-                    if (refs.referencedBy.length > 0) {
-                        output.push('\n**Referenced By:**\n');
-                        refs.referencedBy.forEach(ref => output.push(`- ${ref.file} (${ref.type})`));
-                    }
-                    output.push('\n');
-                }
-            });
-        }
+		while (size >= 1024 && unitIndex < units.length - 1) {
+			size /= 1024;
+			unitIndex++;
+		}
 
-        // Add individual file sections
-        files.forEach(file => {
-            output.push(`\n## ${file.relativePath}\n`);
-            
-            // Add file metadata
-            if (options.enhancedSummaries && file.analysis) {
-                output.push('```yaml');
-                output.push(`language: ${file.languageId}`);
-                output.push(`size: ${this.formatSize(file.size)}`);
-                if (file.analysis.frameworks && file.analysis.frameworks.length > 0) {
-                    output.push(`frameworks: ${file.analysis.frameworks.join(', ')}`);
-                }
-                if (file.analysis.aiSummary) {
-                    output.push(`summary: ${file.analysis.aiSummary}`);
-                }
-                output.push('```\n');
-            }
+		return `${size.toFixed(1)} ${units[unitIndex]}`;
+	}
 
-            // Add file content with proper code fence
-            const lang = options.codeFenceLanguageMap?.[file.languageId] || file.languageId;
-            output.push(`\`\`\`${lang}`);
-            output.push(file.content);
-            output.push('```');
-
-            if (options.extraSpacing) {
-                output.push('\n');
-            }
-        });
-
-        return output.join('\n');
-    }
-
-    private formatSize(bytes: number): string {
-        const units = ['B', 'KB', 'MB', 'GB'];
-        let size = bytes;
-        let unitIndex = 0;
-
-        while (size >= 1024 && unitIndex < units.length - 1) {
-            size /= 1024;
-            unitIndex++;
-        }
-
-        return `${size.toFixed(1)} ${units[unitIndex]}`;
-    }
-
-    private redactSensitiveData(content: string): string {
-        let redactedContent = content;
-
-        // Apply each sensitive pattern
-        Object.entries(this.sensitivePatterns).forEach(([, pattern]) => {
-            redactedContent = redactedContent.replace(pattern, (_, prefix) => {
-                return `${prefix}=[REDACTED]`;
-            });
-        });
-
-        return redactedContent;
-    }
+	private chunkContent(content: string, chunkSize: number): string[] {
+		const lines = content.split('\n');
+		const chunks: string[] = [];
+		for (let i = 0; i < lines.length; i += chunkSize) {
+			chunks.push(lines.slice(i, i + chunkSize).join('\n'));
+		}
+		return chunks;
+	}
 }

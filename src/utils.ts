@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import * as vscode from 'vscode';
 
 export interface CrossReference {
     sourceFile: string;
@@ -167,4 +168,16 @@ export function shouldIgnoreFile(fileName: string): boolean {
         /Thumbs\.db$/
     ];
     return ignorePatterns.some(pattern => pattern.test(fileName));
+}
+
+export function getActiveEditor(): vscode.TextEditor | undefined {
+    return vscode.window.activeTextEditor;
+}
+
+export function getActiveEditorLanguageId(editor: vscode.TextEditor): string | undefined {
+    return editor.document.languageId;
+}
+
+export function getActiveEditorText(editor: vscode.TextEditor): string | undefined {
+    return editor.document.getText();
 } 

@@ -6,7 +6,8 @@
   "description": "Collects code from all currently open tabs and combines it into one file",
   "version": "0.1.1",
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.75.0",
+    "node": ">=18.0.0"
   },
   "categories": [
     "Other"
@@ -35,39 +36,46 @@
     "commands": [
       {
         "command": "extension.aggregateOpenTabs",
-        "title": "Aggregate Open Tabs"
+        "title": "Aggregate Open Tabs into One File",
+        "icon": "$(files)"
       },
       {
         "command": "extension.selectiveAggregate",
-        "title": "Aggregate Selectively"
+        "title": "Selectively Aggregate Open Tabs",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "extension.copyAggregatedContent",
+        "title": "Copy Aggregated Content to Clipboard",
+        "icon": "$(copy)"
       },
       {
         "command": "extension.openInNewWindow",
-        "title": "Open in New Window"
+        "title": "Open Aggregated File in New Window",
+        "icon": "$(open-editors-view-icon)"
       },
       {
         "command": "extension.uploadToGist",
-        "title": "Upload to Gist"
-      },
-      {
-        "command": "extension.saveSnapshot",
-        "title": "Save Snapshot"
-      },
-      {
-        "command": "extension.loadSnapshot",
-        "title": "Load Snapshot"
-      },
-      {
-        "command": "extension.togglePreview",
-        "title": "Toggle Preview"
+        "title": "Upload Aggregated Content to GitHub Gist",
+        "icon": "$(gist)"
       },
       {
         "command": "extension.refreshAggregateView",
-        "title": "Refresh View"
+        "title": "Refresh",
+        "icon": "$(refresh)"
       },
       {
         "command": "extension.openConfiguration",
-        "title": "Open Configuration"
+        "title": "Open Configuration",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "extension.saveSnapshot",
+        "title": "Save Current Aggregation as Snapshot"
+      },
+      {
+        "command": "extension.loadSnapshot",
+        "title": "Load Previous Aggregation Snapshot"
       }
     ],
     "menus": {
@@ -96,6 +104,16 @@
       "view/item/context": [
         {
           "command": "extension.copyAggregatedContent",
+          "when": "viewItem == aggregatedFile",
+          "group": "inline"
+        },
+        {
+          "command": "extension.openInNewWindow",
+          "when": "viewItem == aggregatedFile",
+          "group": "inline"
+        },
+        {
+          "command": "extension.uploadToGist",
           "when": "viewItem == aggregatedFile",
           "group": "inline"
         }
@@ -200,20 +218,17 @@
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",
-    "@types/minimatch": "^5.1.2",
-    "@types/mocha": "^10.0.10",
-    "@types/node": "^20.17.14",
-    "@types/sinon": "^17.0.3",
-    "@types/vscode": "^1.74.0",
-    "@typescript-eslint/eslint-plugin": "^6.21.0",
-    "@typescript-eslint/parser": "^6.21.0",
-    "@vscode/test-electron": "^2.4.1",
-    "eslint": "^8.57.1",
-    "minimatch": "^9.0.5",
-    "mocha": "^10.8.2",
-    "sinon": "^19.0.2",
-    "ts-mockito": "^2.6.1",
-    "typescript": "^5.7.3"
+    "@types/mocha": "^10.0.6",
+    "@types/node": "20.2.5",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "glob": "^7.2.3",
+    "mocha": "^10.2.0",
+    "typescript": "^5.3.3",
+    "vsce": "^2.15.0",
+    "@vscode/test-electron": "^2.3.8"
   },
   "repository": {
     "type": "git",
@@ -221,12 +236,6 @@
   },
   "publisher": "hospedales",
   "dependencies": {
-    "@octokit/openapi-types": "^19.1.0",
-    "@octokit/rest": "^20.1.1",
-    "@types/node-fetch": "^2.6.12",
-    "@vscode/codicons": "^0.0.35",
-    "highlight.js": "^11.11.1",
-    "marked": "^11.2.0",
-    "node-fetch": "^2.7.0"
+    "minimatch": "^9.0.3"
   }
 }

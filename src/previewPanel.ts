@@ -123,7 +123,7 @@ export class PreviewPanel {
         }
 
         // Get updated content and refresh
-        await vscode.commands.executeCommand('extension.aggregateOpenTabs');
+        await vscode.commands.executeCommand('extension.refreshPreview');
     }
 
     private _getInitialHtml(extensionUri: vscode.Uri): string {

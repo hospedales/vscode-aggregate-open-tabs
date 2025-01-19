@@ -3,6 +3,7 @@ import { Octokit } from '@octokit/rest';
 
 export class GistUploader {
     private octokit: Octokit | undefined;
+    private readonly apiBaseUrl = 'https://api.github.com';
 
     constructor() {
         this.initializeOctokit();
@@ -10,14 +11,14 @@ export class GistUploader {
 
     private async initializeOctokit() {
         const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
-        const token = config.get<string>('githubToken');
+        const token = config.get<string>('gistToken');
         
         if (token) {
-            this.octokit = new Octokit({ auth: token });
+            this.octokit = new Octokit({ auth: token, baseUrl: this.apiBaseUrl });
         }
     }
 
-    async uploadToGist(content: string, description: string = 'Aggregated Files'): Promise<string | undefined> {
+    async upload(content: string, description: string = 'Aggregated Files'): Promise<string | undefined> {
         if (!this.octokit) {
             const response = await vscode.window.showInformationMessage(
                 'GitHub token not configured. Would you like to configure it now?',
@@ -27,17 +28,17 @@ export class GistUploader {
 
             if (response === 'Yes') {
                 const token = await vscode.window.showInputBox({
-                    prompt: 'Enter your GitHub token',
+                    prompt: 'Enter your GitHub Personal Access Token',
                     password: true
                 });
 
                 if (token) {
                     await vscode.workspace.getConfiguration('aggregateOpenTabs').update(
-                        'githubToken',
+                        'gistToken',
                         token,
                         vscode.ConfigurationTarget.Global
                     );
-                    this.octokit = new Octokit({ auth: token });
+                    this.octokit = new Octokit({ auth: token, baseUrl: this.apiBaseUrl });
                 } else {
                     return undefined;
                 }
