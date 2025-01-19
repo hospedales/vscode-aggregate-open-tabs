@@ -1,16 +1,49 @@
 import * as vscode from 'vscode';
 import { FileMetadata, FormatOptions, FileAnalysis } from './types';
 import { analyzeFile } from './analyzer';
+import { minimatch } from 'minimatch';
 
 export class AggregationService {
     constructor() {}
 
     async aggregateFiles(documents: readonly vscode.TextDocument[], options: FormatOptions): Promise<string> {
+        const config = vscode.workspace.getConfiguration('aggregateOpenTabs');
+        const includeTypes = config.get<string[]>('includeFileTypes', []);
+        const excludeTypes = config.get<string[]>('excludeFileTypes', []);
+        const excludePatterns = config.get<string[]>('excludePatterns', [
+            '**/*.env',
+            '**/*.lock',
+            '**/node_modules/**'
+        ]);
+
+        // Filter documents based on configuration
+        const filteredDocs = documents.filter(doc => {
+            // Check if file type is included (if include list is not empty)
+            if (includeTypes.length > 0) {
+                const ext = doc.fileName.split('.').pop() || '';
+                if (!includeTypes.includes(ext) && !includeTypes.includes('*')) {
+                    return false;
+                }
+            }
+
+            // Check if file type is excluded
+            if (excludeTypes.length > 0) {
+                const ext = doc.fileName.split('.').pop() || '';
+                if (excludeTypes.includes(ext)) {
+                    return false;
+                }
+            }
+
+            // Check exclude patterns
+            const relativePath = vscode.workspace.asRelativePath(doc.fileName);
+            return !excludePatterns.some(pattern => minimatch(relativePath, pattern));
+        });
+
         const metadata: FileMetadata[] = [];
         const analyses: Map<string, FileAnalysis> = new Map();
 
         // First pass: collect metadata and analyze files
-        for (const doc of documents) {
+        for (const doc of filteredDocs) {
             if (doc.uri.scheme === 'file') {
                 const content = doc.getText();
                 const analysis = await analyzeFile(doc);

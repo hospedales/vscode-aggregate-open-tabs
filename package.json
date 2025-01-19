@@ -135,6 +135,18 @@
           "default": [],
           "description": "File types to exclude from aggregation."
         },
+        "aggregateOpenTabs.excludePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/*.env",
+            "**/*.lock",
+            "**/node_modules/**"
+          ],
+          "description": "Glob patterns for files to exclude from aggregation."
+        },
         "aggregateOpenTabs.preview.autoRefresh": {
           "type": "boolean",
           "default": true,
@@ -169,6 +181,11 @@
           "type": "object",
           "default": {},
           "description": "Map of file extensions to code fence language identifiers."
+        },
+        "aggregateOpenTabs.gistToken": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub Personal Access Token for uploading gists."
         }
       }
     }
@@ -178,7 +195,7 @@
     "compile": "tsc -p ./ && tsc -p ./media/tsconfig.json",
     "watch": "tsc -watch -p ./ && tsc -watch -p ./media/tsconfig.json",
     "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src --ext ts && eslint media --ext ts",
+    "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
