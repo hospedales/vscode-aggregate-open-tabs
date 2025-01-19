@@ -103,7 +103,7 @@ export function activate(context: vscode.ExtensionContext) {
             const documents = vscode.workspace.textDocuments;
             const output = await aggregationService.aggregateFiles(documents, options);
             
-            const gistUrl = await gistUploader.upload(output);
+            const gistUrl = await gistUploader.uploadToGist(output);
             if (gistUrl) {
                 const action = await vscode.window.showInformationMessage(
                     `Content uploaded to Gist: ${gistUrl}`,
@@ -133,27 +133,35 @@ export function activate(context: vscode.ExtensionContext) {
             });
 
             if (name) {
-                await snapshotManager.saveSnapshot(name, output);
+                await snapshotManager.saveSnapshot([{
+                    fileName: name,
+                    relativePath: name,
+                    content: output,
+                    size: output.length,
+                    lastModified: new Date().toISOString(),
+                    languageId: 'markdown'
+                }]);
                 vscode.window.showInformationMessage(`Snapshot '${name}' saved successfully`);
             }
         }),
 
         vscode.commands.registerCommand('extension.loadSnapshot', async () => {
-            const snapshots = await snapshotManager.listSnapshots();
+            const snapshots = await snapshotManager.getSnapshots();
             if (snapshots.length === 0) {
                 vscode.window.showInformationMessage('No snapshots available');
                 return;
             }
 
-            const selected = await vscode.window.showQuickPick(snapshots, {
-                placeHolder: 'Select a snapshot to load'
-            });
+            const selected = await vscode.window.showQuickPick(
+                snapshots.map(s => s.timestamp),
+                { placeHolder: 'Select a snapshot to load' }
+            );
 
             if (selected) {
-                const content = await snapshotManager.loadSnapshot(selected);
-                if (content) {
+                const snapshot = snapshots.find(s => s.timestamp === selected);
+                if (snapshot) {
                     const panel = PreviewPanel.createOrShow(context.extensionUri);
-                    panel.updateContent(content);
+                    panel.updateContent(snapshot.files[0].content);
                 }
             }
         }),
